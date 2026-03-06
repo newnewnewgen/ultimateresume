@@ -1,0 +1,9 @@
+{
+  "name": "Jane Doe",
+  "location": "San Francisco, CA",
+  "email": "jane.doe@email.com",
+  "phone": "(555) 123-4567",
+  "linkedin": "linkedin.com/in/janedoe",
+  "website": "janedoe.dev",
+  "sections": ["summary", "experience", "skills", "projects", "education"]
+}

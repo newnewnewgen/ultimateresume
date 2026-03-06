@@ -1,0 +1,35 @@
+Senior Software Engineer - Platform Team
+
+About Us:
+We are a fast-growing fintech startup revolutionizing digital payments. Our platform processes millions of transactions daily, and we're looking for a Senior Software Engineer to join our Platform team.
+
+What You'll Do:
+- Design and build scalable microservices architecture for our payment processing platform
+- Lead technical design reviews and mentor junior engineers
+- Implement CI/CD pipelines and improve developer productivity
+- Work with cross-functional teams including Product, Design, and Data Science
+- Drive adoption of best practices in code quality, testing, and security
+- Optimize system performance and reliability for high-throughput transaction processing
+
+What We're Looking For:
+- 5+ years of software engineering experience
+- Strong proficiency in Python, Go, or Java
+- Experience with microservices architecture and containerization (Docker, Kubernetes)
+- Experience with cloud platforms (AWS, GCP, or Azure)
+- Strong understanding of CI/CD practices and DevOps principles
+- Experience with relational databases (PostgreSQL) and caching systems (Redis)
+- Excellent communication skills and ability to work in cross-functional teams
+
+Nice to Have:
+- Experience in fintech or payment processing
+- Knowledge of security best practices and compliance (SOC 2, PCI-DSS)
+- Experience with event-driven architectures (Kafka, RabbitMQ)
+- Contributions to open source projects
+- Experience with machine learning or data pipeline systems
+
+Who You Are:
+- You're passionate about building reliable, scalable systems
+- You thrive in a fast-paced, collaborative environment
+- You care deeply about code quality and engineering excellence
+- You enjoy mentoring others and sharing knowledge
+- You're excited about the future of digital payments
