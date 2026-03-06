@@ -42,7 +42,7 @@ Download your finished resume — optimized for both ATS parsing and hiring mana
 
 ### Prerequisites
 - Python 3.10+
-- An [Anthropic API key](https://console.anthropic.com/)
+- A [Google Gemini API key](https://aistudio.google.com/app/apikey)
 
 ### Installation
 
@@ -52,10 +52,10 @@ pip install -r requirements.txt
 
 ### Configuration
 
-Set your Anthropic API key:
+Set your Gemini API key:
 
 ```bash
-export ANTHROPIC_API_KEY="your-key-here"
+export GEMINI_API_KEY="your-key-here"
 ```
 
 ### Running
@@ -89,7 +89,7 @@ The app opens at `http://localhost:8501`.
 ## Architecture
 
 - **Vectorization:** Uses `all-MiniLM-L6-v2` sentence-transformer for semantic embeddings
-- **AI Engine:** Claude (via Anthropic SDK) for all natural language tasks
+- **AI Engine:** Gemini 2.0 Flash (via Google Generative AI SDK) for all natural language tasks
 - **Matching:** Cosine similarity between rubric vectors and activity bank vectors
 - **UI:** Streamlit with session state for pipeline persistence
 

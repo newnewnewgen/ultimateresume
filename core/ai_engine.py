@@ -1,4 +1,4 @@
-"""AI engine for all LLM-powered operations using Anthropic Claude."""
+"""AI engine for all LLM-powered operations using Google Gemini."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import os
 from typing import Any
 
-import anthropic
+import google.generativeai as genai
 
 from core.models import (
     ATSRubricItem,
@@ -23,21 +23,30 @@ from prompts.templates import (
     WRITE_STI_STATEMENT,
 )
 
-
-def get_client() -> anthropic.Anthropic:
-    """Get an Anthropic client."""
-    return anthropic.Anthropic()
+# Model used for all AI calls — swap to "gemini-1.5-flash" for faster/cheaper calls
+GEMINI_MODEL = "gemini-2.0-flash"
 
 
-def _call_claude(prompt: str, max_tokens: int = 4096) -> str:
-    """Make a call to Claude and return the text response."""
-    client = get_client()
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}],
+def _get_model() -> genai.GenerativeModel:
+    """Configure the Gemini client and return a GenerativeModel."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise EnvironmentError("GEMINI_API_KEY environment variable is not set.")
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel(GEMINI_MODEL)
+
+
+def _call_gemini(prompt: str, max_output_tokens: int = 4096) -> str:
+    """Make a call to Gemini and return the text response."""
+    model = _get_model()
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.types.GenerationConfig(
+            max_output_tokens=max_output_tokens,
+            temperature=0.3,
+        ),
     )
-    return message.content[0].text
+    return response.text
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -64,7 +73,7 @@ def _extract_json(text: str) -> dict[str, Any]:
 def clean_job_description(raw_text: str) -> CleanedJobDescription:
     """Use AI to clean and structure a raw job description."""
     prompt = CLEAN_JOB_DESCRIPTION.format(job_description=raw_text)
-    response = _call_claude(prompt)
+    response = _call_gemini(prompt)
     data = _extract_json(response)
 
     return CleanedJobDescription(
@@ -83,7 +92,7 @@ def create_ats_rubric(cleaned_jd: CleanedJobDescription) -> list[ATSRubricItem]:
         nice_to_have_skills=json.dumps(cleaned_jd.nice_to_have_skills),
         valued_qualities=json.dumps(cleaned_jd.valued_qualities),
     )
-    response = _call_claude(prompt, max_tokens=8192)
+    response = _call_gemini(prompt, max_output_tokens=8192)
     data = _extract_json(response)
 
     items = []
@@ -108,7 +117,7 @@ def create_intent_rubric(cleaned_jd: CleanedJobDescription) -> IntentRubric:
         valued_qualities=json.dumps(cleaned_jd.valued_qualities),
         holistic_person=cleaned_jd.holistic_person_definition,
     )
-    response = _call_claude(prompt, max_tokens=8192)
+    response = _call_gemini(prompt, max_output_tokens=8192)
     data = _extract_json(response)
 
     items = []
@@ -144,7 +153,7 @@ def write_sti_statement(
         job_title=activity.job_title,
         company=activity.company,
     )
-    return _call_claude(prompt, max_tokens=512).strip()
+    return _call_gemini(prompt, max_output_tokens=512).strip()
 
 
 def assemble_resume(
@@ -175,7 +184,7 @@ def assemble_resume(
         sections=", ".join(template.sections),
         statements_block=statements_block,
     )
-    return _call_claude(prompt, max_tokens=8192).strip()
+    return _call_gemini(prompt, max_output_tokens=8192).strip()
 
 
 def intent_rewrite(
@@ -194,4 +203,4 @@ def intent_rewrite(
         intent_rubric=rubric_text,
         holistic_summary=intent_rubric.holistic_summary,
     )
-    return _call_claude(prompt, max_tokens=8192).strip()
+    return _call_gemini(prompt, max_output_tokens=8192).strip()
