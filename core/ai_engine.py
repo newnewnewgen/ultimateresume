@@ -24,22 +24,29 @@ from prompts.templates import (
     WRITE_STI_STATEMENT,
 )
 
-# Model used for all AI calls — swap to "gemini-1.5-flash" for faster/cheaper calls
-GEMINI_MODEL = "gemini-2.0-flash"
+# Flash for fast, low-context tasks (parsing, extraction, rubric generation)
+GEMINI_FLASH = "gemini-2.5-flash"
+# Pro for important writing tasks (S-T-I statements, resume assembly, intent rewrite)
+GEMINI_PRO = "gemini-2.5-pro"
 
 
-def _get_model() -> genai.GenerativeModel:
+def _get_model(model_name: str = GEMINI_FLASH) -> genai.GenerativeModel:
     """Configure the Gemini client and return a GenerativeModel."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise EnvironmentError("GEMINI_API_KEY environment variable is not set.")
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel(GEMINI_MODEL)
+    return genai.GenerativeModel(model_name)
 
 
-def _call_gemini(prompt: str, max_output_tokens: int = 4096) -> str:
-    """Make a call to Gemini and return the text response."""
-    model = _get_model()
+def _call_gemini(prompt: str, max_output_tokens: int = 4096, use_pro: bool = False) -> str:
+    """Make a call to Gemini and return the text response.
+
+    Args:
+        use_pro: If True, use gemini-2.5-pro for higher quality writing.
+                 If False (default), use gemini-2.5-flash for speed.
+    """
+    model = _get_model(GEMINI_PRO if use_pro else GEMINI_FLASH)
     response = model.generate_content(
         prompt,
         generation_config=genai.types.GenerationConfig(
@@ -154,7 +161,7 @@ def write_sti_statement(
         job_title=activity.job_title,
         company=activity.company,
     )
-    return _call_gemini(prompt, max_output_tokens=512).strip()
+    return _call_gemini(prompt, max_output_tokens=512, use_pro=True).strip()
 
 
 def assemble_resume(
@@ -185,7 +192,7 @@ def assemble_resume(
         sections=", ".join(template.sections),
         statements_block=statements_block,
     )
-    return _call_gemini(prompt, max_output_tokens=8192).strip()
+    return _call_gemini(prompt, max_output_tokens=8192, use_pro=True).strip()
 
 
 def intent_rewrite(
@@ -204,7 +211,7 @@ def intent_rewrite(
         intent_rubric=rubric_text,
         holistic_summary=intent_rubric.holistic_summary,
     )
-    return _call_gemini(prompt, max_output_tokens=8192).strip()
+    return _call_gemini(prompt, max_output_tokens=8192, use_pro=True).strip()
 
 
 def parse_pdf_resume_template(pdf_text: str) -> dict:
