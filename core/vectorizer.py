@@ -11,7 +11,8 @@ import re
 from collections import Counter
 
 import numpy as np
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 
 from core.models import ActivityBullet, ATSRubricItem, VectorMatch
 
@@ -25,12 +26,12 @@ KEYWORD_WEIGHT = 0.30    # Exact keyword / phrase overlap
 CONTEXT_WEIGHT = 0.15    # Job-title / domain context bonus
 
 
-def _configure_gemini():
-    """Ensure Gemini API is configured."""
+def _get_client() -> genai.Client:
+    """Return a configured Gemini client."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise EnvironmentError("GEMINI_API_KEY environment variable is not set.")
-    genai.configure(api_key=api_key)
+    return genai.Client(api_key=api_key)
 
 
 def embed_texts_gemini(texts: list[str], task_type: str = "SEMANTIC_SIMILARITY") -> list[list[float]]:
@@ -41,17 +42,17 @@ def embed_texts_gemini(texts: list[str], task_type: str = "SEMANTIC_SIMILARITY")
         task_type: One of SEMANTIC_SIMILARITY, RETRIEVAL_DOCUMENT, RETRIEVAL_QUERY,
                    CLASSIFICATION, CLUSTERING.
     """
-    _configure_gemini()
+    client = _get_client()
     # Gemini embedding API accepts batches up to 100
     all_vectors = []
     for i in range(0, len(texts), 100):
         batch = texts[i:i + 100]
-        result = genai.embed_content(
-            model=f"models/{EMBEDDING_MODEL}",
-            content=batch,
-            task_type=task_type,
+        result = client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=batch,
+            config=genai_types.EmbedContentConfig(task_type=task_type),
         )
-        all_vectors.extend(result["embedding"])
+        all_vectors.extend([e.values for e in result.embeddings])
     return all_vectors
 
 

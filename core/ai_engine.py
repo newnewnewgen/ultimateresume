@@ -6,7 +6,8 @@ import json
 import os
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 
 from core.models import (
     ATSRubricItem,
@@ -25,64 +26,90 @@ from prompts.templates import (
     WRITE_STI_STATEMENT,
 )
 
-# Flash for fast, low-context tasks (parsing, extraction, rubric generation)
+# No-thinking model for JSON extraction (thinking tokens eat into output budget)
+GEMINI_FLASH_JSON = "gemini-2.0-flash"
+# Flash with thinking for analysis tasks
 GEMINI_FLASH = "gemini-2.5-flash"
 # Pro for important writing tasks (S-T-I statements, resume assembly, intent rewrite)
 GEMINI_PRO = "gemini-2.5-pro"
 
 
-def _get_model(model_name: str = GEMINI_FLASH) -> genai.GenerativeModel:
-    """Configure the Gemini client and return a GenerativeModel."""
+def _get_client() -> genai.Client:
+    """Return a configured Gemini client."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise EnvironmentError("GEMINI_API_KEY environment variable is not set.")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model_name)
+    return genai.Client(api_key=api_key)
 
 
-def _call_gemini(prompt: str, max_output_tokens: int = 4096, use_pro: bool = False) -> str:
+def _call_gemini(prompt: str, max_output_tokens: int = 8192, use_pro: bool = False, json_mode: bool = False) -> str:
     """Make a call to Gemini and return the text response.
 
     Args:
         use_pro: If True, use gemini-2.5-pro for higher quality writing.
-                 If False (default), use gemini-2.5-flash for speed.
+        json_mode: If True, use gemini-2.0-flash (no thinking) for structured
+                   JSON extraction. Gemini 2.5 Flash thinking tokens consume the
+                   output budget and cause empty responses on extraction tasks.
     """
-    model = _get_model(GEMINI_PRO if use_pro else GEMINI_FLASH)
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.types.GenerationConfig(
+    if use_pro:
+        model_name = GEMINI_PRO
+    elif json_mode:
+        model_name = GEMINI_FLASH_JSON
+    else:
+        model_name = GEMINI_FLASH
+
+    client = _get_client()
+    response = client.models.generate_content(
+        model=model_name,
+        contents=prompt,
+        config=genai_types.GenerateContentConfig(
             max_output_tokens=max_output_tokens,
             temperature=0.3,
         ),
     )
-    return response.text
+    text = response.text
+    if not text or not text.strip():
+        finish_reason = None
+        try:
+            finish_reason = response.candidates[0].finish_reason
+        except Exception:
+            pass
+        raise ValueError(
+            f"Gemini returned an empty response. finish_reason={finish_reason}. "
+            "This may be due to token limits or a safety filter."
+        )
+    return text
 
 
 def _extract_json(text: str) -> dict[str, Any]:
-    """Extract JSON from a response that might contain markdown fences."""
+    """Extract JSON from a response that might contain markdown fences or preamble."""
     text = text.strip()
-    if text.startswith("```"):
-        # Remove markdown code fences
-        lines = text.split("\n")
-        # Drop first line (```json or ```) and last line (```)
-        json_lines = []
-        in_block = False
-        for line in lines:
-            if line.strip().startswith("```") and not in_block:
-                in_block = True
-                continue
-            if line.strip() == "```" and in_block:
-                break
-            if in_block:
-                json_lines.append(line)
-        text = "\n".join(json_lines)
-    return json.loads(text)
+
+    # Strip markdown code fences if present
+    if "```" in text:
+        import re
+        match = re.search(r"```(?:json)?\s*\n([\s\S]*?)\n```", text)
+        if match:
+            text = match.group(1).strip()
+
+    # Find the outermost JSON object or array (handles preamble/postamble)
+    for start_char, end_char in [('{', '}'), ('[', ']')]:
+        start = text.find(start_char)
+        end = text.rfind(end_char)
+        if start != -1 and end != -1 and end > start:
+            candidate = text[start:end + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+
+    raise ValueError(f"Could not extract valid JSON from Gemini response. Raw text:\n{text[:500]!r}")
 
 
 def clean_job_description(raw_text: str) -> CleanedJobDescription:
     """Use AI to clean and structure a raw job description."""
     prompt = CLEAN_JOB_DESCRIPTION.format(job_description=raw_text)
-    response = _call_gemini(prompt)
+    response = _call_gemini(prompt, json_mode=True)
     data = _extract_json(response)
 
     return CleanedJobDescription(
@@ -101,7 +128,7 @@ def create_ats_rubric(cleaned_jd: CleanedJobDescription) -> list[ATSRubricItem]:
         nice_to_have_skills=json.dumps(cleaned_jd.nice_to_have_skills),
         valued_qualities=json.dumps(cleaned_jd.valued_qualities),
     )
-    response = _call_gemini(prompt, max_output_tokens=8192)
+    response = _call_gemini(prompt, max_output_tokens=8192, json_mode=True)
     data = _extract_json(response)
 
     items = []
@@ -128,7 +155,7 @@ def create_intent_rubric(cleaned_jd: CleanedJobDescription) -> IntentRubric:
         valued_qualities=json.dumps(cleaned_jd.valued_qualities),
         holistic_person=cleaned_jd.holistic_person_definition,
     )
-    response = _call_gemini(prompt, max_output_tokens=8192)
+    response = _call_gemini(prompt, max_output_tokens=8192, json_mode=True)
     data = _extract_json(response)
 
     items = []
@@ -267,7 +294,7 @@ def extract_skills_from_activities(activities: list) -> dict[str, list[str]]:
         ], indent=2)
 
         prompt = EXTRACT_ACTIVITY_SKILLS.format(activities_json=activities_json)
-        response = _call_gemini(prompt, max_output_tokens=4096)
+        response = _call_gemini(prompt, max_output_tokens=8192, json_mode=True)
         data = _extract_json(response)
 
         for item in data.get("activities", []):
@@ -281,5 +308,5 @@ def extract_skills_from_activities(activities: list) -> dict[str, list[str]]:
 def parse_pdf_resume_template(pdf_text: str) -> dict:
     """Use AI to parse a PDF resume's text into structured template data."""
     prompt = PARSE_PDF_RESUME_TEMPLATE.format(pdf_text=pdf_text)
-    response = _call_gemini(prompt, max_output_tokens=4096)
+    response = _call_gemini(prompt, max_output_tokens=4096, json_mode=True)
     return _extract_json(response)

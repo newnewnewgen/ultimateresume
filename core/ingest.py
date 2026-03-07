@@ -17,12 +17,13 @@ def parse_activity_bank_csv(content: str) -> list[ActivityBullet]:
     reader = csv.DictReader(io.StringIO(content))
     activities = []
     for row in reader:
-        # Normalize column names (handle various casings)
-        normalized = {k.strip().lower().replace(" ", ""): v.strip() for k, v in row.items()}
+        # Normalize column names (strip spaces, underscores, and lowercase)
+        normalized = {k.strip().lower().replace(" ", "").replace("_", ""): v.strip() for k, v in row.items()}
 
+        bullet_id = normalized.get("bulletid") or normalized.get("id", "")
         activities.append(
             ActivityBullet(
-                bullet_id=normalized.get("bulletid", ""),
+                bullet_id=bullet_id,
                 situation=normalized.get("situation", ""),
                 action=normalized.get("action", ""),
                 impact=normalized.get("impact", ""),
