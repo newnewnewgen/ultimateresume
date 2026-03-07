@@ -1,6 +1,6 @@
 """Vector embedding and hybrid similarity matching engine.
 
-Uses Google Gemini text-embedding-004 for domain-aware embeddings,
+Uses Google Gemini gemini-embedding-004 for domain-aware embeddings,
 combined with keyword overlap scoring for accurate skill matching.
 """
 
@@ -18,7 +18,7 @@ from core.models import ActivityBullet, ATSRubricItem, VectorMatch
 
 # ── Gemini Embedding ─────────────────────────────────────────────────────────
 
-EMBEDDING_MODEL = "text-embedding-004"
+EMBEDDING_MODEL = "gemini-embedding-004"
 
 # Scoring weights for hybrid matching
 SEMANTIC_WEIGHT = 0.55   # Gemini embedding cosine similarity
@@ -35,7 +35,7 @@ def _get_client() -> genai.Client:
 
 
 def embed_texts_gemini(texts: list[str], task_type: str = "SEMANTIC_SIMILARITY") -> list[list[float]]:
-    """Embed texts using Gemini text-embedding-004.
+    """Embed texts using Gemini gemini-embedding-004.
 
     Args:
         texts: List of strings to embed.
