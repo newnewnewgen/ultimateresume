@@ -57,6 +57,41 @@ def parse_activity_bank_json(content: str) -> list[ActivityBullet]:
     return activities
 
 
+def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    """Extract text from PDF bytes using PyPDF2."""
+    import pypdf
+
+    reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+    pages = []
+    for page in reader.pages:
+        text = page.extract_text()
+        if text:
+            pages.append(text)
+    return "\n\n".join(pages)
+
+
+def parse_resume_template_from_pdf(pdf_bytes: bytes) -> ResumeTemplate:
+    """Parse a PDF resume into a ResumeTemplate by extracting text and using AI to analyze structure."""
+    from core.ai_engine import parse_pdf_resume_template
+
+    pdf_text = _extract_text_from_pdf(pdf_bytes)
+    if not pdf_text.strip():
+        raise ValueError("Could not extract any text from the PDF. The file may be image-based or corrupted.")
+
+    data = parse_pdf_resume_template(pdf_text)
+
+    return ResumeTemplate(
+        name=data.get("name", ""),
+        location=data.get("location", ""),
+        email=data.get("email", ""),
+        phone=data.get("phone", ""),
+        linkedin=data.get("linkedin", ""),
+        website=data.get("website", ""),
+        sections=data.get("sections", ["experience", "skills", "projects", "education"]),
+        raw_text=pdf_text,
+    )
+
+
 def parse_resume_template(content: str) -> ResumeTemplate:
     """Parse a resume template from plain text or JSON.
 
@@ -71,19 +106,22 @@ def parse_resume_template(content: str) -> ResumeTemplate:
     """
     content = content.strip()
 
-    # Try JSON first
+    # Try JSON first — but only if it actually looks like valid JSON
     if content.startswith("{"):
-        data = json.loads(content)
-        return ResumeTemplate(
-            name=data.get("name", ""),
-            location=data.get("location", ""),
-            email=data.get("email", ""),
-            phone=data.get("phone", ""),
-            linkedin=data.get("linkedin", ""),
-            website=data.get("website", ""),
-            sections=data.get("sections", ["experience", "skills", "projects", "education"]),
-            raw_text=content,
-        )
+        try:
+            data = json.loads(content)
+            return ResumeTemplate(
+                name=data.get("name", ""),
+                location=data.get("location", ""),
+                email=data.get("email", ""),
+                phone=data.get("phone", ""),
+                linkedin=data.get("linkedin", ""),
+                website=data.get("website", ""),
+                sections=data.get("sections", ["experience", "skills", "projects", "education"]),
+                raw_text=content,
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass  # Fall through to plain text parsing
 
     # Plain text parsing
     template = ResumeTemplate(raw_text=content)

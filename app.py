@@ -7,7 +7,7 @@ then produces an ATS-optimized and intent-aligned resume with human-in-the-loop 
 import streamlit as st
 import json
 
-from core.ingest import parse_activity_bank_csv, parse_activity_bank_json, parse_resume_template
+from core.ingest import parse_activity_bank_csv, parse_activity_bank_json, parse_resume_template, parse_resume_template_from_pdf
 from core.pipeline import (
     step1_ingest_and_vectorize,
     step2_analyze_job_description,
@@ -122,14 +122,19 @@ if st.session_state.pipeline_step == 0:
 elif st.session_state.pipeline_step == 1:
     st.header("Step 2: Upload Your Resume Template")
     st.markdown(
-        "Upload a plain text or JSON file defining your resume structure "
-        "(name, contact info, section order)."
+        "Upload a **PDF**, plain text, or JSON file defining your resume structure. "
+        "PDFs will be auto-parsed for design and structure using AI."
     )
 
-    uploaded = st.file_uploader("Resume Template", type=["txt", "json"])
+    uploaded = st.file_uploader("Resume Template", type=["txt", "json", "pdf"])
     if uploaded:
-        content = uploaded.read().decode("utf-8")
-        template = parse_resume_template(content)
+        if uploaded.name.lower().endswith(".pdf"):
+            pdf_bytes = uploaded.read()
+            with st.spinner("Extracting text from PDF and analyzing structure with AI..."):
+                template = parse_resume_template_from_pdf(pdf_bytes)
+        else:
+            content = uploaded.read().decode("utf-8")
+            template = parse_resume_template(content)
 
         st.subheader("Parsed Template")
         col1, col2 = st.columns(2)

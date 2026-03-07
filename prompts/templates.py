@@ -168,3 +168,32 @@ Rewrite the resume with these goals:
 
 Return the COMPLETE rewritten resume as formatted plain text.
 """
+
+PARSE_PDF_RESUME_TEMPLATE = """\
+You are an expert resume analyst. You have been given the extracted text from a PDF resume.
+Analyze its structure and extract the template information.
+
+EXTRACTED TEXT:
+{pdf_text}
+
+Identify:
+1. The person's name (usually the largest text at the top)
+2. Contact information: email, phone, location, LinkedIn URL, website/portfolio
+3. The section headers used in this resume and their order (e.g., Experience, Skills, Education, Projects, Summary)
+4. The general formatting style (how sections are structured)
+
+Return EXACTLY this JSON format (no extra text):
+{{
+  "name": "Full Name",
+  "email": "email@example.com",
+  "phone": "phone number",
+  "location": "City, State",
+  "linkedin": "linkedin url or empty string",
+  "website": "website url or empty string",
+  "sections": ["section1", "section2", "section3"],
+  "formatting_notes": "Brief description of the resume's formatting style"
+}}
+
+For sections, normalize names: use "experience" (not "Work Experience"), "skills" (not "Technical Skills"),
+"education", "projects", "summary", "certifications", etc.
+"""

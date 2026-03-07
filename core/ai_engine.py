@@ -20,6 +20,7 @@ from prompts.templates import (
     CREATE_ATS_RUBRIC,
     CREATE_INTENT_RUBRIC,
     INTENT_REWRITE,
+    PARSE_PDF_RESUME_TEMPLATE,
     WRITE_STI_STATEMENT,
 )
 
@@ -204,3 +205,10 @@ def intent_rewrite(
         holistic_summary=intent_rubric.holistic_summary,
     )
     return _call_gemini(prompt, max_output_tokens=8192).strip()
+
+
+def parse_pdf_resume_template(pdf_text: str) -> dict:
+    """Use AI to parse a PDF resume's text into structured template data."""
+    prompt = PARSE_PDF_RESUME_TEMPLATE.format(pdf_text=pdf_text)
+    response = _call_gemini(prompt, max_output_tokens=4096)
+    return _extract_json(response)
