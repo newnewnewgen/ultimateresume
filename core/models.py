@@ -22,7 +22,14 @@ class ActivityBullet:
 
     @property
     def combined_text(self) -> str:
-        return f"{self.situation} {self.action} {self.impact}"
+        parts = []
+        if self.situation:
+            parts.append(f"Situation: {self.situation}")
+        if self.action:
+            parts.append(f"Action: {self.action}")
+        if self.impact:
+            parts.append(f"Impact: {self.impact}")
+        return ". ".join(parts)
 
 
 @dataclass
