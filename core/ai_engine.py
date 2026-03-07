@@ -26,8 +26,8 @@ from prompts.templates import (
     WRITE_STI_STATEMENT,
 )
 
-# No-thinking model for JSON extraction (thinking tokens eat into output budget)
-GEMINI_FLASH_JSON = "gemini-2.0-flash"
+# Flash without thinking for JSON extraction (thinking tokens eat into output budget)
+GEMINI_FLASH_JSON = "gemini-2.5-flash"
 # Flash with thinking for analysis tasks
 GEMINI_FLASH = "gemini-2.5-flash"
 # Pro for important writing tasks (S-T-I statements, resume assembly, intent rewrite)
@@ -47,9 +47,9 @@ def _call_gemini(prompt: str, max_output_tokens: int = 8192, use_pro: bool = Fal
 
     Args:
         use_pro: If True, use gemini-2.5-pro for higher quality writing.
-        json_mode: If True, use gemini-2.0-flash (no thinking) for structured
-                   JSON extraction. Gemini 2.5 Flash thinking tokens consume the
-                   output budget and cause empty responses on extraction tasks.
+        json_mode: If True, disable thinking (budget=0) for structured JSON
+                   extraction. Thinking tokens consume the output budget and
+                   cause empty responses on extraction tasks.
     """
     if use_pro:
         model_name = GEMINI_PRO
@@ -59,12 +59,14 @@ def _call_gemini(prompt: str, max_output_tokens: int = 8192, use_pro: bool = Fal
         model_name = GEMINI_FLASH
 
     client = _get_client()
+    thinking_config = genai_types.ThinkingConfig(thinking_budget=0) if json_mode else None
     response = client.models.generate_content(
         model=model_name,
         contents=prompt,
         config=genai_types.GenerateContentConfig(
             max_output_tokens=max_output_tokens,
             temperature=0.3,
+            thinking_config=thinking_config,
         ),
     )
     text = response.text
