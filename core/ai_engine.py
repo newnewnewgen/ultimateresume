@@ -150,20 +150,30 @@ def create_intent_rubric(cleaned_jd: CleanedJobDescription) -> IntentRubric:
 def write_sti_statement(
     rubric_item: ATSRubricItem,
     activity: "ActivityBullet",
+    holistic_person: str = "",
+    previous_bullets: list[str] | None = None,
 ) -> str:
     """Use AI to write a polished S-T-I statement for a matched activity."""
     from core.models import ActivityBullet
+
+    # Build other bullets context to avoid repetition
+    other_bullets = "  (none yet — this is the first bullet)" if not previous_bullets else ""
+    if previous_bullets:
+        other_bullets = "\n".join(f"  - {b}" for b in previous_bullets)
 
     prompt = WRITE_STI_STATEMENT.format(
         rubric_item=rubric_item.item,
         ats_keywords=", ".join(rubric_item.ats_keywords) if rubric_item.ats_keywords else rubric_item.item,
         situation_desc=rubric_item.situation_description,
         action_desc=rubric_item.action_description,
+        holistic_person=holistic_person or "Not provided",
         original_situation=activity.situation,
         original_action=activity.action,
         original_impact=activity.impact,
         job_title=activity.job_title,
         company=activity.company,
+        extracted_skills=", ".join(activity.extracted_skills) if activity.extracted_skills else "Not available",
+        other_bullets=other_bullets,
     )
     return _call_gemini(prompt, max_output_tokens=512, use_pro=True).strip()
 
@@ -171,6 +181,9 @@ def write_sti_statement(
 def assemble_resume(
     template: "ResumeTemplate",
     statements: list[dict],
+    role_context: str = "",
+    holistic_person: str = "",
+    consolidated_skills: list[str] | None = None,
 ) -> str:
     """Use AI to assemble S-T-I statements into a structured resume."""
     from core.models import ResumeTemplate
@@ -186,6 +199,10 @@ def assemble_resume(
             f"    Target Skill: {s['rubric_item']}\n\n"
         )
 
+    skills_list = "  Not available"
+    if consolidated_skills:
+        skills_list = ", ".join(consolidated_skills)
+
     prompt = ASSEMBLE_RESUME.format(
         name=template.name,
         location=template.location,
@@ -195,6 +212,9 @@ def assemble_resume(
         website=template.website,
         sections=", ".join(template.sections),
         statements_block=statements_block,
+        role_context=role_context or "Not provided",
+        holistic_person=holistic_person or "Not provided",
+        skills_list=skills_list,
     )
     return _call_gemini(prompt, max_output_tokens=8192, use_pro=True).strip()
 
@@ -202,6 +222,7 @@ def assemble_resume(
 def intent_rewrite(
     ats_resume: str,
     intent_rubric: IntentRubric,
+    ats_keywords: list[str] | None = None,
 ) -> str:
     """Use AI to rewrite the ATS resume to align with intent rubric."""
     rubric_text = ""
@@ -210,10 +231,15 @@ def intent_rewrite(
             f"  [{item.category}] (weight: {item.weight}): {item.description}\n"
         )
 
+    keyword_checklist = "  (no checklist provided)"
+    if ats_keywords:
+        keyword_checklist = ", ".join(sorted(set(ats_keywords)))
+
     prompt = INTENT_REWRITE.format(
         ats_resume=ats_resume,
         intent_rubric=rubric_text,
         holistic_summary=intent_rubric.holistic_summary,
+        ats_keyword_checklist=keyword_checklist,
     )
     return _call_gemini(prompt, max_output_tokens=8192, use_pro=True).strip()
 

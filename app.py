@@ -515,11 +515,15 @@ elif st.session_state.pipeline_step == 4:
         if not selections:
             st.error("Please select at least one activity match.")
         else:
+            holistic = ""
+            if st.session_state.cleaned_jd:
+                holistic = st.session_state.cleaned_jd.holistic_person_definition
             with st.spinner("AI is writing polished S-T-I statements..."):
                 statements = step5_generate_statements(
                     st.session_state.ats_rubric,
                     st.session_state.activities_by_id,
                     selections,
+                    holistic_person=holistic,
                 )
             st.session_state.statements = statements
             st.session_state.pipeline_step = 5
@@ -544,16 +548,22 @@ elif st.session_state.pipeline_step == 5:
             "detail": "For each rubric item + selected activity pair, the AI receives:\n"
                       "- The skill group label and ALL ATS keywords to weave in\n"
                       "- The situation/action framing from the rubric\n"
+                      "- The ideal candidate profile (holistic person definition)\n"
                       "- The original Situation, Action, and Impact from your activity bank\n"
-                      "- The job title and company for context",
+                      "- AI-extracted skills/technologies from the activity\n"
+                      "- The job title and company for context\n"
+                      "- All previously written bullets (to avoid repetitive phrasing)",
         },
         {
             "label": "Writing rules enforced",
             "detail": "1. Start with a strong action verb\n"
                       "2. Incorporate ATS keywords naturally (exact terms ATS systems scan for)\n"
-                      "3. Preserve the truth of your original activity — no fabricated accomplishments\n"
-                      "4. Quantify impact with original numbers where available\n"
-                      "5. Keep to 1-2 lines maximum",
+                      "3. Use verified skills/technologies from AI extraction for accuracy\n"
+                      "4. Frame to reflect the ideal candidate profile\n"
+                      "5. Preserve the truth of your original activity — no fabricated accomplishments\n"
+                      "6. Quantify impact with original numbers where available\n"
+                      "7. Keep to 1-2 lines maximum\n"
+                      "8. Use different phrasing from other bullets to avoid repetition",
         },
     ])
 
@@ -571,10 +581,28 @@ elif st.session_state.pipeline_step == 5:
     st.session_state.statements = updated
 
     if st.button("Assemble ATS Resume"):
+        # Gather context for the assembler
+        cleaned_jd = st.session_state.cleaned_jd
+        holistic = cleaned_jd.holistic_person_definition if cleaned_jd else ""
+        role_context = ""
+        if cleaned_jd:
+            role_context = (
+                f"Required skills: {', '.join(cleaned_jd.required_skills[:10])}. "
+                f"Nice-to-have: {', '.join(cleaned_jd.nice_to_have_skills[:5])}."
+            )
+        # Consolidate skills from all selected activities
+        consolidated_skills = set()
+        for s in updated:
+            act = st.session_state.activities_by_id.get(s.get("bullet_id"))
+            if act and act.extracted_skills:
+                consolidated_skills.update(act.extracted_skills)
         with st.spinner("AI is assembling your ATS-optimized resume..."):
             ats_resume = step6_assemble_ats_resume(
                 st.session_state.resume_template,
                 updated,
+                role_context=role_context,
+                holistic_person=holistic,
+                consolidated_skills=sorted(consolidated_skills),
             )
         st.session_state.ats_resume = ats_resume
         st.session_state.pipeline_step = 6
@@ -604,7 +632,9 @@ elif st.session_state.pipeline_step == 6:
                       "2. Sections ordered to match your template\n"
                       "3. Experience entries in reverse-chronological order\n"
                       "4. Bullet point text used EXACTLY as written — no rewording at this stage\n"
-                      "5. Skills/projects sections populated based on evident competencies",
+                      "5. Skills section built from consolidated AI-extracted skills across all selected activities\n"
+                      "6. Summary/objective tailored to target role context and ideal candidate profile\n"
+                      "7. Skills ordered by relevance to the target job description",
         },
     ])
 
@@ -616,10 +646,15 @@ elif st.session_state.pipeline_step == 6:
     st.session_state.ats_resume = ats_resume
 
     if st.button("Apply Intent-Driven Rewrite"):
+        # Collect all ATS keywords for the keyword checklist
+        all_ats_kw = []
+        for item in st.session_state.ats_rubric:
+            all_ats_kw.extend(item.ats_keywords)
         with st.spinner("AI is rewriting for hiring manager intent alignment..."):
             intent_resume = step7_intent_rewrite(
                 ats_resume,
                 st.session_state.intent_rubric,
+                ats_keywords=all_ats_kw,
             )
         st.session_state.intent_resume = intent_resume
         st.session_state.pipeline_step = 7
@@ -691,10 +726,14 @@ elif st.session_state.pipeline_step == 7:
             st.rerun()
     with col_redo:
         if st.button("🔄 Redo — Re-run Intent Rewrite"):
+            all_ats_kw = []
+            for item in st.session_state.ats_rubric:
+                all_ats_kw.extend(item.ats_keywords)
             with st.spinner("AI is re-generating the intent-aligned version..."):
                 new_intent = step7_intent_rewrite(
                     st.session_state.ats_resume,
                     st.session_state.intent_rubric,
+                    ats_keywords=all_ats_kw,
                 )
             st.session_state.intent_resume = new_intent
             st.rerun()

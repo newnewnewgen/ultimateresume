@@ -108,20 +108,30 @@ TARGET SKILL/REQUIREMENT:
   Situation Context: {situation_desc}
   Action Context: {action_desc}
 
+IDEAL CANDIDATE PROFILE:
+  {holistic_person}
+
 SOURCE ACTIVITY:
   Original Situation: {original_situation}
   Original Action: {original_action}
   Original Impact: {original_impact}
   Job Title: {job_title}
   Company: {company}
+  Verified Skills/Technologies: {extracted_skills}
+
+OTHER BULLETS ALREADY WRITTEN FOR THIS RESUME (avoid repeating similar phrasing):
+{other_bullets}
 
 Write a single, powerful resume bullet point in S-T-I format. Rules:
 1. Start with a strong action verb
 2. Incorporate as many of the ATS keywords as naturally fit — these are the exact terms
    an ATS will scan for, so they must appear in the text
-3. Keep the core truth of the original activity - do NOT fabricate accomplishments
-4. Quantify impact where possible (use original numbers if available)
-5. Keep it to 1-2 lines maximum
+3. Use the verified skills/technologies list to ensure technical terms are accurate
+4. Frame the bullet to reflect the ideal candidate profile where natural
+5. Keep the core truth of the original activity - do NOT fabricate accomplishments
+6. Quantify impact where possible (use original numbers if available)
+7. Keep it to 1-2 lines maximum
+8. Use different phrasing and action verbs from the other bullets listed above
 
 Return ONLY the bullet point text, nothing else.
 """
@@ -129,6 +139,12 @@ Return ONLY the bullet point text, nothing else.
 ASSEMBLE_RESUME = """\
 You are an expert resume formatter. Organize the following S-T-I statements into
 a professional resume structure that matches the template format.
+
+TARGET ROLE CONTEXT:
+  {role_context}
+
+IDEAL CANDIDATE PROFILE:
+  {holistic_person}
 
 TEMPLATE STRUCTURE:
   Name: {name}
@@ -139,6 +155,9 @@ TEMPLATE STRUCTURE:
   Website: {website}
   Sections: {sections}
 
+CONSOLIDATED SKILLS (extracted from selected activities):
+{skills_list}
+
 COMPLETED S-T-I STATEMENTS (with metadata):
 {statements_block}
 
@@ -147,8 +166,11 @@ Rules:
 2. Order sections to match the template structure: {sections}
 3. Within experience, order jobs reverse-chronologically
 4. Do NOT rewrite or change any bullet point text - use them exactly as provided
-5. If there are skills or projects sections in the template, create appropriate content
-   based on the skills evident from the bullets
+5. For the skills section, use the consolidated skills list above — organize them into
+   logical categories (e.g., Languages, Frameworks, Tools, Methodologies)
+6. If the template includes a summary/objective section, write a concise 2-3 sentence
+   professional summary tailored to the target role and ideal candidate profile
+7. Order skills to lead with those most relevant to the target role
 
 Return the resume as clean, formatted plain text ready for a document.
 Use this exact format:
@@ -167,6 +189,9 @@ keyword matching. Now, rewrite it to deeply align with the hiring manager's TRUE
 CURRENT ATS-OPTIMIZED RESUME:
 {ats_resume}
 
+ATS KEYWORD CHECKLIST (every keyword below MUST appear in the final resume):
+{ats_keyword_checklist}
+
 INTENT SCORING RUBRIC:
 {intent_rubric}
 
@@ -174,7 +199,7 @@ HOLISTIC IDEAL CANDIDATE:
 {holistic_summary}
 
 Rewrite the resume with these goals:
-1. Maintain ALL ATS keywords and phrases (do not remove any)
+1. Maintain ALL ATS keywords from the checklist above — verify each one appears in the output
 2. Adjust framing, emphasis, and narrative flow to match the holistic person they want
 3. Strengthen culture-add signals
 4. Enhance domain jargon usage where natural

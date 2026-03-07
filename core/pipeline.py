@@ -71,9 +71,12 @@ def step5_generate_statements(
     ats_rubric: list[ATSRubricItem],
     activities_by_id: dict[str, ActivityBullet],
     selections: dict[str, str],  # rubric_id -> selected bullet_id
+    holistic_person: str = "",
 ) -> list[dict]:
     """Step 5: Generate S-T-I statements for each rubric item using selected activities."""
     results = []
+    previous_bullets: list[str] = []
+
     for item in ats_rubric:
         selected_id = selections.get(item.rubric_id)
         if not selected_id:
@@ -82,9 +85,17 @@ def step5_generate_statements(
         if not activity:
             continue
 
-        statement = write_sti_statement(item, activity)
+        statement = write_sti_statement(
+            item,
+            activity,
+            holistic_person=holistic_person,
+            previous_bullets=previous_bullets,
+        )
         item.matched_bullet_ids = [selected_id]
         item.generated_statement = statement
+
+        # Track written bullets so subsequent calls can avoid repetition
+        previous_bullets.append(statement)
 
         results.append({
             "rubric_id": item.rubric_id,
@@ -102,14 +113,24 @@ def step5_generate_statements(
 def step6_assemble_ats_resume(
     template: ResumeTemplate,
     statements: list[dict],
+    role_context: str = "",
+    holistic_person: str = "",
+    consolidated_skills: list[str] | None = None,
 ) -> str:
     """Step 6: Assemble S-T-I statements into ATS-optimized resume."""
-    return assemble_resume(template, statements)
+    return assemble_resume(
+        template,
+        statements,
+        role_context=role_context,
+        holistic_person=holistic_person,
+        consolidated_skills=consolidated_skills,
+    )
 
 
 def step7_intent_rewrite(
     ats_resume: str,
     intent_rubric: IntentRubric,
+    ats_keywords: list[str] | None = None,
 ) -> str:
     """Step 7: Rewrite resume to align with intent rubric."""
-    return intent_rewrite(ats_resume, intent_rubric)
+    return intent_rewrite(ats_resume, intent_rubric, ats_keywords=ats_keywords)
