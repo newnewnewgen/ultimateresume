@@ -19,6 +19,7 @@ class ActivityBullet:
     dates_worked: str
     location: str
     vector: list[float] = field(default_factory=list)
+    extracted_skills: list[str] = field(default_factory=list)  # AI-extracted skills/technologies
 
     @property
     def combined_text(self) -> str:

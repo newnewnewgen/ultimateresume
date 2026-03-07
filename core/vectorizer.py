@@ -60,18 +60,23 @@ def embed_texts_gemini(texts: list[str], task_type: str = "SEMANTIC_SIMILARITY")
 def _build_activity_text(activity: ActivityBullet) -> str:
     """Build structured text for an activity bullet.
 
-    Separates S/A/I with labels so the embedding model understands
-    the role of each part rather than treating it as flat text.
+    Leads with skills and action (where the matchable signal is),
+    then adds situation context and impact. This ensures the embedding
+    captures the *capabilities* demonstrated, not just the narrative.
     """
     parts = []
-    if activity.situation:
-        parts.append(f"Situation: {activity.situation}")
+    # Lead with extracted skills if available (strongest signal)
+    if activity.extracted_skills:
+        parts.append(f"Skills: {', '.join(activity.extracted_skills)}")
+    # Action is where tools/technologies are described — put it early
     if activity.action:
         parts.append(f"Action: {activity.action}")
-    if activity.impact:
-        parts.append(f"Impact: {activity.impact}")
     if activity.job_title:
         parts.append(f"Role: {activity.job_title}")
+    if activity.situation:
+        parts.append(f"Context: {activity.situation}")
+    if activity.impact:
+        parts.append(f"Result: {activity.impact}")
     return ". ".join(parts)
 
 
@@ -118,25 +123,30 @@ def _extract_keyphrases(item: ATSRubricItem) -> list[str]:
 
 def _keyword_overlap_score(
     keyphrases: list[str],
-    activity_text: str,
+    activity: ActivityBullet,
 ) -> float:
-    """Score how well the activity text contains the rubric's key terms.
+    """Score how well the activity matches the rubric's key terms.
 
-    Returns 0.0 to 1.0:
-    - Full phrase match = 1.0
-    - Partial token overlap = proportional
+    Uses extracted_skills (AI-identified, includes synonyms) as the primary
+    match source, with raw text as fallback. This means an activity that says
+    "container orchestration" will match "Kubernetes" because the skill
+    extraction step identified both.
+
+    Returns 0.0 to 1.0.
     """
-    text_lower = activity_text.lower()
-    activity_tokens = set(_tokenize(text_lower))
+    # Build the searchable text: extracted skills + raw S/A/I
+    raw_text = f"{activity.situation} {activity.action} {activity.impact}".lower()
+    skill_text = " ".join(activity.extracted_skills).lower() if activity.extracted_skills else ""
+    combined = f"{skill_text} {raw_text}"
+    combined_tokens = set(_tokenize(combined))
 
-    # Check for full phrase matches first (highest signal)
+    # Check for full phrase matches (highest signal)
     phrase_matches = 0
     for phrase in keyphrases:
-        if phrase in text_lower:
+        if phrase in combined:
             phrase_matches += 1
 
     if phrase_matches > 0:
-        # At least one full phrase matched — strong signal
         return min(1.0, 0.7 + 0.3 * (phrase_matches / len(keyphrases)))
 
     # Fall back to token-level overlap
@@ -147,7 +157,7 @@ def _keyword_overlap_score(
     if not keyphrase_tokens:
         return 0.0
 
-    matched = keyphrase_tokens & activity_tokens
+    matched = keyphrase_tokens & combined_tokens
     return len(matched) / len(keyphrase_tokens)
 
 
@@ -232,9 +242,8 @@ def find_top_matches(
         # 1. Semantic similarity from Gemini embeddings
         sem_score = cosine_similarity(rubric_item.vector, activity.vector)
 
-        # 2. Keyword / phrase overlap
-        activity_text = f"{activity.situation} {activity.action} {activity.impact}"
-        kw_score = _keyword_overlap_score(keyphrases, activity_text)
+        # 2. Keyword / phrase overlap (uses extracted skills + raw text)
+        kw_score = _keyword_overlap_score(keyphrases, activity)
 
         # 3. Context / domain overlap bonus
         ctx_score = _context_score(rubric_item, activity)

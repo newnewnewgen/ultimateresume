@@ -110,8 +110,8 @@ if st.session_state.pipeline_step == 0:
             use_container_width=True,
         )
 
-        if st.button("Vectorize Activity Bank & Continue"):
-            with st.spinner("Embedding activity bank (this may take a moment)..."):
+        if st.button("Extract Skills & Vectorize Activity Bank"):
+            with st.spinner("AI is extracting skills from each activity, then embedding..."):
                 activities = step1_ingest_and_vectorize(activities)
             st.session_state.activity_bank = activities
             st.session_state.activities_by_id = {a.bullet_id: a for a in activities}

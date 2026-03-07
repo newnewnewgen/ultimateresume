@@ -185,6 +185,38 @@ Rewrite the resume with these goals:
 Return the COMPLETE rewritten resume as formatted plain text.
 """
 
+EXTRACT_ACTIVITY_SKILLS = """\
+You are an expert resume analyst. For each job activity below, extract ALL skills,
+technologies, tools, methodologies, and competencies demonstrated.
+
+ACTIVITIES:
+{activities_json}
+
+For each activity, extract:
+- Hard skills: specific technologies, tools, programming languages, frameworks, platforms
+- Methodologies: Agile, CI/CD, TDD, microservices, etc.
+- Soft skills: leadership, communication, mentoring, cross-functional collaboration, etc.
+- Domain knowledge: fintech, healthcare, e-commerce, data engineering, etc.
+
+Include BOTH the explicit terms used AND common synonyms/aliases. For example:
+- If they say "container orchestration" → also include "Kubernetes", "Docker"
+- If they say "automated testing" → also include "CI/CD", "test automation"
+- If they say "led a team" → include "leadership", "team management", "mentoring"
+
+Return EXACTLY this JSON format (no extra text):
+{{
+  "activities": [
+    {{
+      "bullet_id": "the bullet ID",
+      "skills": ["skill1", "skill2", "skill3", ...]
+    }},
+    ...
+  ]
+}}
+
+Be thorough — extract every skill signal, even implied ones. Include 5-15 skills per activity.
+"""
+
 PARSE_PDF_RESUME_TEMPLATE = """\
 You are an expert resume analyst. You have been given the extracted text from a PDF resume.
 Analyze its structure and extract the template information.

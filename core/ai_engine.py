@@ -19,6 +19,7 @@ from prompts.templates import (
     CLEAN_JOB_DESCRIPTION,
     CREATE_ATS_RUBRIC,
     CREATE_INTENT_RUBRIC,
+    EXTRACT_ACTIVITY_SKILLS,
     INTENT_REWRITE,
     PARSE_PDF_RESUME_TEMPLATE,
     WRITE_STI_STATEMENT,
@@ -215,6 +216,40 @@ def intent_rewrite(
         holistic_summary=intent_rubric.holistic_summary,
     )
     return _call_gemini(prompt, max_output_tokens=8192, use_pro=True).strip()
+
+
+def extract_skills_from_activities(activities: list) -> dict[str, list[str]]:
+    """Use AI to extract skills/technologies from each activity bullet.
+
+    Returns a dict mapping bullet_id -> list of extracted skills.
+    Processes in batches of 20 to stay within token limits.
+    """
+    all_skills: dict[str, list[str]] = {}
+
+    # Process in batches
+    for i in range(0, len(activities), 20):
+        batch = activities[i:i + 20]
+        activities_json = json.dumps([
+            {
+                "bullet_id": a.bullet_id,
+                "situation": a.situation,
+                "action": a.action,
+                "impact": a.impact,
+                "job_title": a.job_title,
+            }
+            for a in batch
+        ], indent=2)
+
+        prompt = EXTRACT_ACTIVITY_SKILLS.format(activities_json=activities_json)
+        response = _call_gemini(prompt, max_output_tokens=4096)
+        data = _extract_json(response)
+
+        for item in data.get("activities", []):
+            bid = item.get("bullet_id", "")
+            skills = item.get("skills", [])
+            all_skills[bid] = [s.lower().strip() for s in skills]
+
+    return all_skills
 
 
 def parse_pdf_resume_template(pdf_text: str) -> dict:

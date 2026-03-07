@@ -23,6 +23,7 @@ from core.ai_engine import (
     clean_job_description,
     create_ats_rubric,
     create_intent_rubric,
+    extract_skills_from_activities,
     intent_rewrite,
     write_sti_statement,
 )
@@ -31,7 +32,12 @@ from core.ai_engine import (
 def step1_ingest_and_vectorize(
     activities: list[ActivityBullet],
 ) -> list[ActivityBullet]:
-    """Step 1: Vectorize the activity bank."""
+    """Step 1: Extract skills from activities, then vectorize the activity bank."""
+    # First, use AI to extract skills/technologies from each activity
+    skills_map = extract_skills_from_activities(activities)
+    for activity in activities:
+        activity.extracted_skills = skills_map.get(activity.bullet_id, [])
+    # Then vectorize (embeddings will include extracted skills for better signal)
     return vectorize_activity_bank(activities)
 
 
