@@ -13,6 +13,7 @@ from core.models import (
     VectorMatch,
 )
 from core.vectorizer import (
+    deduplicate_rubric,
     find_all_matches,
     vectorize_activity_bank,
     vectorize_ats_rubric,
@@ -53,8 +54,9 @@ def step4_vectorize_and_match(
     activities: list[ActivityBullet],
     top_k: int = 3,
 ) -> tuple[list[ATSRubricItem], dict[str, list[VectorMatch]]]:
-    """Step 4: Vectorize ATS rubric and find matches."""
+    """Step 4: Vectorize ATS rubric, deduplicate overlapping items, and find matches."""
     ats_rubric = vectorize_ats_rubric(ats_rubric)
+    ats_rubric = deduplicate_rubric(ats_rubric)
     matches = find_all_matches(ats_rubric, activities, top_k)
     return ats_rubric, matches
 

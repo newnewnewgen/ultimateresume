@@ -78,11 +78,12 @@ def _build_activity_text(activity: ActivityBullet) -> str:
 def _build_rubric_query(item: ATSRubricItem) -> str:
     """Build a query-style text for a rubric item.
 
-    Leads with the keyword/skill for strong signal, then adds
-    context from the situation/action descriptions.
+    Leads with the skill group label and all ATS keywords for strong signal,
+    then adds context from the situation/action descriptions.
     """
-    # Lead with the core skill/keyword (repeated for emphasis)
     parts = [f"Skill: {item.item}"]
+    if item.ats_keywords:
+        parts.append(f"Keywords: {', '.join(item.ats_keywords)}")
     if item.situation_description:
         parts.append(f"Context: {item.situation_description}")
     if item.action_description:
@@ -98,19 +99,21 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _extract_keyphrases(item: ATSRubricItem) -> list[str]:
-    """Extract the core keyword/phrases from a rubric item.
+    """Extract all keyword/phrases from a rubric item.
 
-    Returns the main item as-is (lowercased) plus individual tokens.
-    This allows matching both "ci/cd pipelines" as a phrase and
-    "ci/cd" and "pipelines" individually.
+    Uses the ats_keywords list (which contains all grouped keywords),
+    plus the item label itself. This means a rubric item for
+    "Containerization (Docker, Kubernetes)" with ats_keywords
+    ["Docker", "Kubernetes", "containerization", "containers"]
+    will match on any of those terms.
     """
-    phrases = [item.item.lower().strip()]
-    # Also split on common delimiters for sub-phrases
-    for part in re.split(r"[,/&]|\band\b", item.item.lower()):
-        part = part.strip()
-        if part and part != phrases[0]:
-            phrases.append(part)
-    return phrases
+    phrases = set()
+    # Add all explicit ATS keywords
+    for kw in item.ats_keywords:
+        phrases.add(kw.lower().strip())
+    # Add the item label itself
+    phrases.add(item.item.lower().strip())
+    return list(phrases)
 
 
 def _keyword_overlap_score(
@@ -257,6 +260,74 @@ def find_top_matches(
         )
         for score, activity in top
     ]
+
+
+def deduplicate_rubric(
+    rubric_items: list[ATSRubricItem],
+    similarity_threshold: float = 0.88,
+) -> list[ATSRubricItem]:
+    """Merge rubric items whose vectors are too similar.
+
+    If two items have cosine similarity >= threshold, merge the lower-priority
+    one into the higher-priority one by combining their ats_keywords.
+
+    Priority order: critical > important > nice_to_have.
+    """
+    if not rubric_items or not rubric_items[0].vector:
+        return rubric_items
+
+    priority_rank = {"critical": 0, "important": 1, "nice_to_have": 2}
+
+    # Build similarity matrix
+    n = len(rubric_items)
+    to_merge: list[tuple[int, int]] = []  # (keep_idx, merge_idx)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            sim = cosine_similarity(rubric_items[i].vector, rubric_items[j].vector)
+            if sim >= similarity_threshold:
+                # Keep the higher-priority item (lower rank number)
+                rank_i = priority_rank.get(rubric_items[i].priority, 1)
+                rank_j = priority_rank.get(rubric_items[j].priority, 1)
+                if rank_i <= rank_j:
+                    to_merge.append((i, j))
+                else:
+                    to_merge.append((j, i))
+
+    # Resolve merge chains: if A merges into B and B merges into C, A should merge into C
+    merge_target: dict[int, int] = {}
+    for keep, drop in to_merge:
+        # Follow chain to find ultimate target
+        while keep in merge_target:
+            keep = merge_target[keep]
+        merge_target[drop] = keep
+
+    # Apply merges
+    merged_indices: set[int] = set()
+    for drop_idx, keep_idx in merge_target.items():
+        merged_indices.add(drop_idx)
+        keeper = rubric_items[keep_idx]
+        dropped = rubric_items[drop_idx]
+
+        # Combine ats_keywords (deduplicated)
+        existing = {kw.lower() for kw in keeper.ats_keywords}
+        for kw in dropped.ats_keywords:
+            if kw.lower() not in existing:
+                keeper.ats_keywords.append(kw)
+                existing.add(kw.lower())
+
+        # Append the dropped item's label to keywords if not already there
+        if dropped.item.lower() not in existing:
+            keeper.ats_keywords.append(dropped.item)
+
+    # Return only non-merged items
+    result = [item for i, item in enumerate(rubric_items) if i not in merged_indices]
+
+    # Re-number IDs
+    for i, item in enumerate(result):
+        item.rubric_id = f"ATS-{i + 1:03d}"
+
+    return result
 
 
 def find_all_matches(

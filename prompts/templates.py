@@ -21,32 +21,46 @@ Distinguish clearly between hard requirements and nice-to-haves.
 
 CREATE_ATS_RUBRIC = """\
 You are an expert ATS (Applicant Tracking System) analyst. Based on the following
-cleaned job description data, create a detailed ATS scoring rubric.
+cleaned job description data, create a focused ATS scoring rubric.
 
 REQUIRED SKILLS: {required_skills}
 NICE-TO-HAVE SKILLS: {nice_to_have_skills}
 VALUED QUALITIES: {valued_qualities}
 
-For each key skill, keyword, or key phrase that an ATS would scan for, create a rubric item.
-For each item, also write it as a Situation (what is the task/challenge) and Action (ways to accomplish it),
-as if describing how a candidate would demonstrate this skill.
+CRITICAL RULES:
+1. GROUP related skills into a SINGLE rubric item. For example:
+   - "Docker" and "Kubernetes" and "containerization" → ONE item: "Containerization (Docker, Kubernetes)"
+   - "Python" and "Go" and "Java" → ONE item: "Programming Languages (Python, Go, Java)"
+   - "CI/CD" and "DevOps" and "automated deployment" → ONE item: "CI/CD & DevOps Practices"
+   - "communication skills" and "cross-functional collaboration" → ONE item: "Cross-Functional Communication"
+2. Each rubric item must represent a DISTINCT skill area — no two items should match the same resume bullet.
+3. Assign a priority tier to each item:
+   - "critical": Explicitly required — missing this likely means rejection
+   - "important": Strongly preferred or implied as necessary
+   - "nice_to_have": Bonus skills that differentiate candidates
+4. The "item" field should be a concise label, and "ats_keywords" should list ALL the specific
+   keywords/phrases an ATS would scan for within that group.
+
+For each item, also write it as a Situation (what is the task/challenge) and Action (ways to accomplish it).
 
 Return EXACTLY this JSON format (no extra text):
 {{
   "rubric_items": [
     {{
       "rubric_id": "ATS-001",
-      "category": "key_skill|key_word|key_phrase",
-      "item": "the exact keyword or phrase the ATS looks for",
-      "situation_description": "A situation/task description framing this skill",
-      "action_description": "Actions that demonstrate this skill"
+      "category": "technical_skill|soft_skill|domain_knowledge|tool_platform|methodology",
+      "priority": "critical|important|nice_to_have",
+      "item": "Concise skill group label",
+      "ats_keywords": ["keyword1", "keyword2", "keyword3"],
+      "situation_description": "A situation/task description framing this skill group",
+      "action_description": "Actions that demonstrate this skill group"
     }},
     ...
   ]
 }}
 
-Be comprehensive - include every keyword, skill, technology, and phrase an ATS would match on.
-Typically produce 15-30 rubric items for a thorough job description.
+Aim for 8-15 DISTINCT rubric items. Fewer, well-grouped items are better than many overlapping ones.
+Each item should map to a different type of work experience.
 """
 
 CREATE_INTENT_RUBRIC = """\
@@ -90,6 +104,7 @@ Situation - Task - Impact bullet point that aligns with the target skill/require
 
 TARGET SKILL/REQUIREMENT:
   Item: {rubric_item}
+  ATS Keywords to incorporate: {ats_keywords}
   Situation Context: {situation_desc}
   Action Context: {action_desc}
 
@@ -102,7 +117,8 @@ SOURCE ACTIVITY:
 
 Write a single, powerful resume bullet point in S-T-I format. Rules:
 1. Start with a strong action verb
-2. Incorporate keywords from the target skill naturally
+2. Incorporate as many of the ATS keywords as naturally fit — these are the exact terms
+   an ATS will scan for, so they must appear in the text
 3. Keep the core truth of the original activity - do NOT fabricate accomplishments
 4. Quantify impact where possible (use original numbers if available)
 5. Keep it to 1-2 lines maximum

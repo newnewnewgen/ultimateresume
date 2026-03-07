@@ -63,8 +63,10 @@ class ATSRubricItem:
     """A single item in the ATS scoring rubric."""
 
     rubric_id: str = ""
-    category: str = ""  # e.g. "key_skill", "key_word", "key_phrase"
-    item: str = ""
+    category: str = ""  # technical_skill, soft_skill, domain_knowledge, tool_platform, methodology
+    priority: str = "important"  # critical, important, nice_to_have
+    item: str = ""  # concise skill group label
+    ats_keywords: list[str] = field(default_factory=list)  # all ATS-scannable keywords in this group
     situation_description: str = ""  # task framing
     action_description: str = ""  # ways to accomplish
     vector: list[float] = field(default_factory=list)

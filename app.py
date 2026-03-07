@@ -210,8 +210,13 @@ elif st.session_state.pipeline_step == 3:
 
     with tab2:
         st.subheader("ATS Scoring Rubric")
+        priority_icons = {"critical": "🔴", "important": "🟡", "nice_to_have": "🟢"}
         for item in st.session_state.ats_rubric:
-            with st.expander(f"[{item.rubric_id}] {item.item} ({item.category})"):
+            icon = priority_icons.get(item.priority, "⚪")
+            with st.expander(f"{icon} [{item.rubric_id}] {item.item} ({item.priority})"):
+                if item.ats_keywords:
+                    st.markdown(f"**ATS Keywords:** {', '.join(item.ats_keywords)}")
+                st.markdown(f"**Category:** {item.category}")
                 st.markdown(f"**Situation:** {item.situation_description}")
                 st.markdown(f"**Action:** {item.action_description}")
 
@@ -248,13 +253,21 @@ elif st.session_state.pipeline_step == 4:
     rubric = st.session_state.ats_rubric
     selections = st.session_state.user_selections
 
-    for item in rubric:
+    # Sort by priority: critical first, then important, then nice_to_have
+    priority_order = {"critical": 0, "important": 1, "nice_to_have": 2}
+    sorted_rubric = sorted(rubric, key=lambda x: priority_order.get(x.priority, 1))
+
+    for item in sorted_rubric:
         item_matches = matches.get(item.rubric_id, [])
         if not item_matches:
             continue
 
-        with st.expander(f"🎯 [{item.rubric_id}] {item.item}", expanded=True):
+        priority_icons = {"critical": "🔴", "important": "🟡", "nice_to_have": "🟢"}
+        icon = priority_icons.get(item.priority, "⚪")
+        with st.expander(f"{icon} [{item.rubric_id}] {item.item} ({item.priority})", expanded=(item.priority == "critical")):
             st.markdown(f"*{item.situation_description}*")
+            if item.ats_keywords:
+                st.caption(f"ATS Keywords: {', '.join(item.ats_keywords)}")
 
             options = ["-- Skip this item --"]
             option_details = [None]

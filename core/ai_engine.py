@@ -108,8 +108,10 @@ def create_ats_rubric(cleaned_jd: CleanedJobDescription) -> list[ATSRubricItem]:
         items.append(
             ATSRubricItem(
                 rubric_id=raw["rubric_id"],
-                category=raw["category"],
+                category=raw.get("category", "technical_skill"),
+                priority=raw.get("priority", "important"),
                 item=raw["item"],
+                ats_keywords=raw.get("ats_keywords", [raw["item"]]),
                 situation_description=raw["situation_description"],
                 action_description=raw["action_description"],
             )
@@ -153,6 +155,7 @@ def write_sti_statement(
 
     prompt = WRITE_STI_STATEMENT.format(
         rubric_item=rubric_item.item,
+        ats_keywords=", ".join(rubric_item.ats_keywords) if rubric_item.ats_keywords else rubric_item.item,
         situation_desc=rubric_item.situation_description,
         action_desc=rubric_item.action_description,
         original_situation=activity.situation,
