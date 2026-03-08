@@ -18,7 +18,7 @@ from core.models import ActivityBullet, ATSRubricItem, VectorMatch
 
 # ── Gemini Embedding ─────────────────────────────────────────────────────────
 
-EMBEDDING_MODEL = "gemini-embedding-004"
+EMBEDDING_MODEL = "gemini-embedding-001"
 
 # Scoring weights for hybrid matching
 SEMANTIC_WEIGHT = 0.55   # Gemini embedding cosine similarity

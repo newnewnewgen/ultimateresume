@@ -23,6 +23,7 @@ from core.ai_engine import (
     clean_job_description,
     create_ats_rubric,
     create_intent_rubric,
+    dedup_bullets,
     extract_skills_from_activities,
     intent_rewrite,
     write_sti_statement,
@@ -58,7 +59,7 @@ def step3_create_rubrics(
 def step4_vectorize_and_match(
     ats_rubric: list[ATSRubricItem],
     activities: list[ActivityBullet],
-    top_k: int = 3,
+    top_k: int = 5,
 ) -> tuple[list[ATSRubricItem], dict[str, list[VectorMatch]]]:
     """Step 4: Vectorize ATS rubric, deduplicate overlapping items, and find matches."""
     ats_rubric = vectorize_ats_rubric(ats_rubric)
@@ -67,46 +68,133 @@ def step4_vectorize_and_match(
     return ats_rubric, matches
 
 
+_PRIORITY_RANK = {"critical": 0, "important": 1, "nice_to_have": 2}
+
+
 def step5_generate_statements(
     ats_rubric: list[ATSRubricItem],
     activities_by_id: dict[str, ActivityBullet],
-    selections: dict[str, str],  # rubric_id -> selected bullet_id
+    selections: dict[str, list[str]],  # rubric_id -> list of selected bullet_ids
     holistic_person: str = "",
 ) -> list[dict]:
-    """Step 5: Generate S-T-I statements for each rubric item using selected activities."""
-    results = []
-    previous_bullets: list[str] = []
+    """Step 5: Generate one bullet per unique selected activity, in parallel.
 
-    for item in ats_rubric:
-        selected_id = selections.get(item.rubric_id)
-        if not selected_id:
+    Each activity bullet is written exactly once, even if selected by multiple
+    rubric items. All bullets are generated simultaneously using Flash, then a
+    single dedup pass fixes any repeated opening verbs.
+    """
+    import concurrent.futures
+    from collections import defaultdict
+
+    rubric_by_id = {item.rubric_id: item for item in ats_rubric}
+
+    # Build reverse map: bullet_id -> list of rubric items that selected it
+    bullet_to_rubrics: dict[str, list[ATSRubricItem]] = defaultdict(list)
+    for rubric_id, bullet_ids in selections.items():
+        rubric_item = rubric_by_id.get(rubric_id)
+        if not rubric_item:
             continue
-        activity = activities_by_id.get(selected_id)
-        if not activity:
-            continue
+        for bullet_id in bullet_ids:
+            if rubric_item not in bullet_to_rubrics[bullet_id]:
+                bullet_to_rubrics[bullet_id].append(rubric_item)
 
-        statement = write_sti_statement(
-            item,
-            activity,
-            holistic_person=holistic_person,
-            previous_bullets=previous_bullets,
-        )
-        item.matched_bullet_ids = [selected_id]
-        item.generated_statement = statement
+    # Sort order: critical first, then by bullet_id for stability
+    def _bullet_sort_key(bullet_id: str) -> tuple:
+        rubrics = bullet_to_rubrics[bullet_id]
+        top_priority = min(_PRIORITY_RANK.get(r.priority, 1) for r in rubrics)
+        return (top_priority, bullet_id)
 
-        # Track written bullets so subsequent calls can avoid repetition
-        previous_bullets.append(statement)
+    sorted_bullet_ids = [
+        bid for bid in sorted(bullet_to_rubrics.keys(), key=_bullet_sort_key)
+        if activities_by_id.get(bid)
+    ]
 
-        results.append({
-            "rubric_id": item.rubric_id,
-            "rubric_item": item.item,
+    # Pre-compute rubric context for each bullet
+    slot_contexts: dict[str, tuple] = {}
+    for bullet_id in sorted_bullet_ids:
+        rubric_items = bullet_to_rubrics[bullet_id]
+        sorted_rubrics = sorted(rubric_items, key=lambda r: _PRIORITY_RANK.get(r.priority, 1))
+        top_priority = sorted_rubrics[0].priority
+        top_rubrics = [r for r in sorted_rubrics if r.priority == top_priority]
+        primary_rubric = top_rubrics[0]
+        secondary_rubrics = top_rubrics[1:] if len(top_rubrics) > 1 else []
+        slot_contexts[bullet_id] = (rubric_items, primary_rubric, secondary_rubrics)
+
+    def _write_one(bullet_id: str) -> dict:
+        activity = activities_by_id[bullet_id]
+        rubric_items, primary_rubric, secondary_rubrics = slot_contexts[bullet_id]
+
+        if len(rubric_items) == 1:
+            rewrite_logic = primary_rubric.item
+        elif secondary_rubrics:
+            combined = ", ".join(r.item for r in [primary_rubric] + secondary_rubrics)
+            rewrite_logic = f"Combined ({combined})"
+        else:
+            rewrite_logic = f"{primary_rubric.item} ({primary_rubric.priority} — highest priority)"
+
+        try:
+            statement = write_sti_statement(
+                primary_rubric,
+                activity,
+                holistic_person=holistic_person,
+                secondary_rubric_items=secondary_rubrics if secondary_rubrics else None,
+            )
+            error_msg = None
+        except Exception as exc:
+            statement = ""
+            error_msg = str(exc)
+
+        # Update rubric item tracking
+        for r in rubric_items:
+            if bullet_id not in r.matched_bullet_ids:
+                r.matched_bullet_ids.append(bullet_id)
+        if statement:
+            primary_rubric.generated_statement = statement
+
+        return {
+            "bullet_id": activity.bullet_id,
             "statement": statement,
+            "error": error_msg,
             "job_title": activity.job_title,
             "company": activity.company,
             "dates": activity.dates_worked,
             "location": activity.location,
-            "bullet_id": activity.bullet_id,
-        })
+            "rubric_ids": [r.rubric_id for r in rubric_items],
+            "rubric_items": [r.item for r in rubric_items],
+            "primary_rubric_id": primary_rubric.rubric_id,
+            "primary_rubric_item": primary_rubric.item,
+            "rewrite_logic": rewrite_logic,
+        }
+
+    # Generate all bullets in parallel
+    results_map: dict[str, dict] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_id = {executor.submit(_write_one, bid): bid for bid in sorted_bullet_ids}
+        for future in concurrent.futures.as_completed(future_to_id):
+            bid = future_to_id[future]
+            try:
+                results_map[bid] = future.result()
+            except Exception as exc:
+                activity = activities_by_id[bid]
+                rubric_items, primary_rubric, secondary_rubrics = slot_contexts[bid]
+                results_map[bid] = {
+                    "bullet_id": bid,
+                    "statement": "",
+                    "error": str(exc),
+                    "job_title": activity.job_title,
+                    "company": activity.company,
+                    "dates": activity.dates_worked,
+                    "location": activity.location,
+                    "rubric_ids": [r.rubric_id for r in rubric_items],
+                    "rubric_items": [r.item for r in rubric_items],
+                    "primary_rubric_id": primary_rubric.rubric_id,
+                    "primary_rubric_item": primary_rubric.item,
+                    "rewrite_logic": primary_rubric.item,
+                }
+
+    # Restore sort order, then fix any repeated opening verbs
+    results = [results_map[bid] for bid in sorted_bullet_ids]
+    results = dedup_bullets(results)
     return results
 
 

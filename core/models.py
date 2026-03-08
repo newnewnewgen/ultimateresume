@@ -18,6 +18,7 @@ class ActivityBullet:
     company: str
     dates_worked: str
     location: str
+    entry_type: str = "work"
     vector: list[float] = field(default_factory=list)
     extracted_skills: list[str] = field(default_factory=list)  # AI-extracted skills/technologies
 
@@ -31,6 +32,55 @@ class ActivityBullet:
         if self.impact:
             parts.append(f"Impact: {self.impact}")
         return ". ".join(parts)
+
+
+@dataclass
+class EducationEntry:
+    """A single education record."""
+    school: str = ""
+    degree: str = ""
+    field_of_study: str = ""
+    location: str = ""
+    start_date: str = ""
+    end_date: str = ""
+    gpa: str = ""
+    description: str = ""
+    bullets: list[str] = field(default_factory=list)
+
+
+@dataclass
+class UserProfile:
+    """Complete user profile — replaces ResumeTemplate as the primary data store."""
+    # Contact
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    location: str = ""
+    linkedin: str = ""
+    website: str = ""
+    summary: str = ""
+    # Education
+    education: list[EducationEntry] = field(default_factory=list)
+    # Other content
+    skills: list[str] = field(default_factory=list)
+    awards: list[str] = field(default_factory=list)
+    certifications: list[str] = field(default_factory=list)
+    additional_sections: dict[str, list[str]] = field(default_factory=dict)
+    # Formatting
+    sections: list[str] = field(default_factory=lambda: ["summary", "experience", "education", "skills"])
+    latex_template: str = ""
+    style_notes: str = ""
+
+    def to_resume_template(self) -> "ResumeTemplate":
+        return ResumeTemplate(
+            name=self.name,
+            location=self.location,
+            email=self.email,
+            phone=self.phone,
+            linkedin=self.linkedin,
+            website=self.website,
+            sections=self.sections,
+        )
 
 
 @dataclass

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
 from google import genai
 from google.genai import types as genai_types
+from google.genai import errors as genai_errors
 
 from core.models import (
     ATSRubricItem,
@@ -17,12 +19,18 @@ from core.models import (
 )
 from prompts.templates import (
     ASSEMBLE_RESUME,
+    ASSEMBLE_LATEX_RESUME,
     CLEAN_JOB_DESCRIPTION,
     CREATE_ATS_RUBRIC,
     CREATE_INTENT_RUBRIC,
+    DEDUP_BULLETS,
+    EDIT_LATEX_TEMPLATE,
     EXTRACT_ACTIVITY_SKILLS,
+    GENERATE_LATEX_TEMPLATE,
     INTENT_REWRITE,
     PARSE_PDF_RESUME_TEMPLATE,
+    PARSE_RESUME_FULL,
+    PARSE_RESUME_TO_ACTIVITY_BANK,
     WRITE_STI_STATEMENT,
 )
 
@@ -42,7 +50,13 @@ def _get_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
-def _call_gemini(prompt: str, max_output_tokens: int = 8192, use_pro: bool = False, json_mode: bool = False) -> str:
+def _call_gemini(
+    prompt: str,
+    max_output_tokens: int = 8192,
+    use_pro: bool = False,
+    json_mode: bool = False,
+    thinking_budget: int | None = None,
+) -> str:
     """Make a call to Gemini and return the text response.
 
     Args:
@@ -50,6 +64,10 @@ def _call_gemini(prompt: str, max_output_tokens: int = 8192, use_pro: bool = Fal
         json_mode: If True, disable thinking (budget=0) for structured JSON
                    extraction. Thinking tokens consume the output budget and
                    cause empty responses on extraction tasks.
+        thinking_budget: Cap thinking tokens. On 2.5 Pro, thinking + output
+                         share max_output_tokens, so an uncapped thinking pass
+                         can exhaust the budget before any text is written.
+                         Set this to reserve room for the actual response.
     """
     if use_pro:
         model_name = GEMINI_PRO
@@ -59,28 +77,55 @@ def _call_gemini(prompt: str, max_output_tokens: int = 8192, use_pro: bool = Fal
         model_name = GEMINI_FLASH
 
     client = _get_client()
-    thinking_config = genai_types.ThinkingConfig(thinking_budget=0) if json_mode else None
-    response = client.models.generate_content(
-        model=model_name,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            max_output_tokens=max_output_tokens,
-            temperature=0.3,
-            thinking_config=thinking_config,
-        ),
-    )
-    text = response.text
-    if not text or not text.strip():
-        finish_reason = None
-        try:
-            finish_reason = response.candidates[0].finish_reason
-        except Exception:
-            pass
-        raise ValueError(
-            f"Gemini returned an empty response. finish_reason={finish_reason}. "
-            "This may be due to token limits or a safety filter."
-        )
-    return text
+    if json_mode:
+        thinking_config = genai_types.ThinkingConfig(thinking_budget=0)
+    elif thinking_budget is not None:
+        thinking_config = genai_types.ThinkingConfig(thinking_budget=thinking_budget)
+    else:
+        thinking_config = None
+
+    # Retry on transient 503 errors with exponential backoff.
+    # If Pro is unavailable after retries, fall back to Flash for one last attempt.
+    max_retries = 3
+    last_error: Exception | None = None
+    models_to_try = [model_name]
+    if use_pro and model_name == GEMINI_PRO:
+        models_to_try.append(GEMINI_FLASH)  # Flash fallback
+
+    for current_model in models_to_try:
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=current_model,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        max_output_tokens=max_output_tokens,
+                        temperature=0.3,
+                        thinking_config=thinking_config,
+                    ),
+                )
+                text = response.text
+                if not text or not text.strip():
+                    finish_reason = None
+                    try:
+                        finish_reason = response.candidates[0].finish_reason
+                    except Exception:
+                        pass
+                    raise ValueError(
+                        f"Gemini returned an empty response. finish_reason={finish_reason}. "
+                        "This may be due to token limits or a safety filter."
+                    )
+                return text
+            except genai_errors.ServerError as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait = 10 * (2 ** attempt)  # 10s, 20s, 40s
+                    time.sleep(wait)
+                # else: fall through to next model or raise
+            except Exception:
+                raise  # non-503 errors propagate immediately
+
+    raise last_error  # type: ignore[misc]
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -180,21 +225,38 @@ def write_sti_statement(
     rubric_item: ATSRubricItem,
     activity: "ActivityBullet",
     holistic_person: str = "",
-    previous_bullets: list[str] | None = None,
+    secondary_rubric_items: list[ATSRubricItem] | None = None,
 ) -> str:
-    """Use AI to write a polished S-T-I statement for a matched activity."""
-    from core.models import ActivityBullet
+    """Use AI to write a grounded bullet point for a matched activity using Flash.
 
-    # Build other bullets context to avoid repetition
-    other_bullets = "  (none yet — this is the first bullet)" if not previous_bullets else ""
-    if previous_bullets:
-        other_bullets = "\n".join(f"  - {b}" for b in previous_bullets)
+    If secondary_rubric_items are provided, their skill context is combined
+    with the primary rubric item (used when the same bullet covers multiple
+    equally-prioritized rubric requirements).
+    """
+    # Build secondary rubric context block
+    secondary_rubric_context = ""
+    if secondary_rubric_items:
+        lines = ["ADDITIONAL SKILL REQUIREMENTS (incorporate alongside the primary):"]
+        for sr in secondary_rubric_items:
+            lines.append(f"  Item: {sr.item}")
+            if sr.ats_keywords:
+                lines.append(f"  Additional Keywords: {', '.join(sr.ats_keywords)}")
+            if sr.action_description:
+                lines.append(f"  Additional Context: {sr.action_description}")
+        secondary_rubric_context = "\n".join(lines) + "\n"
+
+    # Merge all ATS keywords (primary + secondary)
+    all_keywords = list(rubric_item.ats_keywords)
+    if secondary_rubric_items:
+        for sr in secondary_rubric_items:
+            all_keywords.extend(sr.ats_keywords)
 
     prompt = WRITE_STI_STATEMENT.format(
         rubric_item=rubric_item.item,
-        ats_keywords=", ".join(rubric_item.ats_keywords) if rubric_item.ats_keywords else rubric_item.item,
+        ats_keywords=", ".join(all_keywords) if all_keywords else rubric_item.item,
         situation_desc=rubric_item.situation_description,
         action_desc=rubric_item.action_description,
+        secondary_rubric_context=secondary_rubric_context,
         holistic_person=holistic_person or "Not provided",
         original_situation=activity.situation,
         original_action=activity.action,
@@ -202,9 +264,37 @@ def write_sti_statement(
         job_title=activity.job_title,
         company=activity.company,
         extracted_skills=", ".join(activity.extracted_skills) if activity.extracted_skills else "Not available",
-        other_bullets=other_bullets,
     )
-    return _call_gemini(prompt, max_output_tokens=512, use_pro=True).strip()
+    return _call_gemini(prompt, max_output_tokens=512, use_pro=False).strip()
+
+
+def dedup_bullets(statements: list[dict]) -> list[dict]:
+    """Check all generated bullets for repeated opening verbs and fix only those.
+
+    Takes the full statement dicts, operates only on successful ones (no error),
+    and returns the list with any repeated-verb bullets minimally reworded.
+    If no repetition is found, bullets are returned verbatim.
+    """
+    successful = [(i, s) for i, s in enumerate(statements) if s.get("statement") and not s.get("error")]
+    if len(successful) < 2:
+        return statements
+
+    bullets_input = [{"id": str(i), "text": s["statement"]} for i, s in successful]
+    prompt = DEDUP_BULLETS.format(bullets_json=json.dumps(bullets_input, indent=2))
+    try:
+        response = _call_gemini(prompt, max_output_tokens=4096, json_mode=True)
+        data = _extract_json(response)
+    except Exception:
+        return statements  # dedup failure is non-fatal — return originals
+
+    id_to_text = {item["id"]: item["text"] for item in data.get("bullets", [])}
+
+    result = list(statements)
+    for i, s in successful:
+        updated_text = id_to_text.get(str(i))
+        if updated_text and updated_text != s["statement"]:
+            result[i] = {**s, "statement": updated_text}
+    return result
 
 
 def assemble_resume(
@@ -215,18 +305,22 @@ def assemble_resume(
     consolidated_skills: list[str] | None = None,
 ) -> str:
     """Use AI to assemble S-T-I statements into a structured resume."""
-    from core.models import ResumeTemplate
+    from collections import defaultdict
 
-    statements_block = ""
+    # Pre-group bullets by role so the AI cannot misattribute them
+    role_order: list[tuple] = []
+    role_bullets: dict[tuple, list[str]] = defaultdict(list)
     for s in statements:
-        statements_block += (
-            f"  - Bullet: {s['statement']}\n"
-            f"    Job Title: {s['job_title']}\n"
-            f"    Company: {s['company']}\n"
-            f"    Dates: {s['dates']}\n"
-            f"    Location: {s['location']}\n"
-            f"    Target Skill: {s['rubric_item']}\n\n"
-        )
+        key = (s["job_title"], s["company"], s.get("dates", ""), s.get("location", ""))
+        if key not in role_bullets:
+            role_order.append(key)
+        role_bullets[key].append(s["statement"])
+
+    work_history_block = ""
+    for job_title, company, dates, location in role_order:
+        work_history_block += f"\n{job_title} | {company} | {dates} | {location}\n"
+        for bullet in role_bullets[(job_title, company, dates, location)]:
+            work_history_block += f"  • {bullet}\n"
 
     skills_list = "  Not available"
     if consolidated_skills:
@@ -240,12 +334,12 @@ def assemble_resume(
         linkedin=template.linkedin,
         website=template.website,
         sections=", ".join(template.sections),
-        statements_block=statements_block,
+        work_history_block=work_history_block,
         role_context=role_context or "Not provided",
         holistic_person=holistic_person or "Not provided",
         skills_list=skills_list,
     )
-    return _call_gemini(prompt, max_output_tokens=8192, use_pro=True).strip()
+    return _call_gemini(prompt, max_output_tokens=16384, use_pro=True, thinking_budget=4096).strip()
 
 
 def intent_rewrite(
@@ -270,7 +364,7 @@ def intent_rewrite(
         holistic_summary=intent_rubric.holistic_summary,
         ats_keyword_checklist=keyword_checklist,
     )
-    return _call_gemini(prompt, max_output_tokens=8192, use_pro=True).strip()
+    return _call_gemini(prompt, max_output_tokens=8192, use_pro=True, thinking_budget=2048).strip()
 
 
 def extract_skills_from_activities(activities: list) -> dict[str, list[str]]:
@@ -312,3 +406,58 @@ def parse_pdf_resume_template(pdf_text: str) -> dict:
     prompt = PARSE_PDF_RESUME_TEMPLATE.format(pdf_text=pdf_text)
     response = _call_gemini(prompt, max_output_tokens=4096, json_mode=True)
     return _extract_json(response)
+
+
+def parse_resume_to_activities(pdf_text: str) -> list[dict]:
+    """Use AI to decompose a resume's work experience bullets into S-A-I activity entries.
+
+    Returns a list of dicts with keys: situation, action, impact,
+    job_title, company, dates_worked, location.
+    """
+    prompt = PARSE_RESUME_TO_ACTIVITY_BANK.format(pdf_text=pdf_text)
+    response = _call_gemini(prompt, max_output_tokens=8192, json_mode=True)
+    data = _extract_json(response)
+    return data.get("activities", [])
+
+
+def parse_resume_full(resume_text: str) -> dict:
+    """Parse a full resume into profile, education, activities, and style notes."""
+    prompt = PARSE_RESUME_FULL.format(resume_text=resume_text)
+    response = _call_gemini(prompt, max_output_tokens=8192, json_mode=True)
+    return _extract_json(response)
+
+
+def generate_latex_template(style_spec: str, profile: dict, sections: list[str]) -> str:
+    """Generate a LaTeX resume template with lorem ipsum content."""
+    prompt = GENERATE_LATEX_TEMPLATE.format(
+        style_spec=style_spec,
+        name=profile.get("name", "Your Name"),
+        email=profile.get("email", "email@example.com"),
+        phone=profile.get("phone", "555-555-5555"),
+        location=profile.get("location", "City, State"),
+        linkedin=profile.get("linkedin", ""),
+        website=profile.get("website", ""),
+        sections=", ".join(sections),
+    )
+    return _call_gemini(prompt, max_output_tokens=8192, use_pro=False).strip()
+
+
+def edit_latex_with_ai(latex: str, instruction: str) -> str:
+    """Apply a user instruction to edit a LaTeX template."""
+    prompt = EDIT_LATEX_TEMPLATE.format(latex=latex, instruction=instruction)
+    return _call_gemini(prompt, max_output_tokens=8192, use_pro=False).strip()
+
+
+def assemble_latex_resume(latex_template: str, resume_text: str, profile: dict) -> str:
+    """Replace lorem ipsum in a LaTeX template with real resume content."""
+    prompt = ASSEMBLE_LATEX_RESUME.format(
+        latex_template=latex_template,
+        resume_text=resume_text,
+        name=profile.get("name", ""),
+        email=profile.get("email", ""),
+        phone=profile.get("phone", ""),
+        location=profile.get("location", ""),
+        linkedin=profile.get("linkedin", ""),
+        website=profile.get("website", ""),
+    )
+    return _call_gemini(prompt, max_output_tokens=8192, use_pro=True, thinking_budget=2048).strip()

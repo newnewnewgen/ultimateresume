@@ -6,24 +6,27 @@ import csv
 import io
 import json
 
-from core.models import ActivityBullet, ResumeTemplate
+from core.models import ActivityBullet, ResumeTemplate, UserProfile, EducationEntry
+
+
+def _make_bullet_id(index: int) -> str:
+    """Generate a zero-padded bullet ID (B001, B002, ...)."""
+    return f"B{index + 1:03d}"
 
 
 def parse_activity_bank_csv(content: str) -> list[ActivityBullet]:
     """Parse a CSV string into ActivityBullet objects.
 
-    Expected columns: bulletID, Situation, Action, Impact, JobTitle, Company, DatesWorked, Location
+    Expected columns: Situation, Action, Impact, JobTitle, Company, DatesWorked, Location
+    Bullet IDs are auto-generated (B001, B002, ...) — any bulletID column in the CSV is ignored.
     """
     reader = csv.DictReader(io.StringIO(content))
     activities = []
-    for row in reader:
-        # Normalize column names (strip spaces, underscores, and lowercase)
+    for i, row in enumerate(reader):
         normalized = {k.strip().lower().replace(" ", "").replace("_", ""): v.strip() for k, v in row.items()}
-
-        bullet_id = normalized.get("bulletid") or normalized.get("id", "")
         activities.append(
             ActivityBullet(
-                bullet_id=bullet_id,
+                bullet_id=_make_bullet_id(i),
                 situation=normalized.get("situation", ""),
                 action=normalized.get("action", ""),
                 impact=normalized.get("impact", ""),
@@ -37,15 +40,18 @@ def parse_activity_bank_csv(content: str) -> list[ActivityBullet]:
 
 
 def parse_activity_bank_json(content: str) -> list[ActivityBullet]:
-    """Parse a JSON string into ActivityBullet objects."""
+    """Parse a JSON string into ActivityBullet objects.
+
+    Bullet IDs are auto-generated (B001, B002, ...) — any bulletID field in the JSON is ignored.
+    """
     data = json.loads(content)
     if isinstance(data, dict):
         data = data.get("activities", data.get("bullets", [data]))
     activities = []
-    for row in data:
+    for i, row in enumerate(data):
         activities.append(
             ActivityBullet(
-                bullet_id=str(row.get("bulletID", row.get("bullet_id", ""))),
+                bullet_id=_make_bullet_id(i),
                 situation=row.get("Situation", row.get("situation", "")),
                 action=row.get("Action", row.get("action", "")),
                 impact=row.get("Impact", row.get("impact", "")),
@@ -69,6 +75,113 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
         if text:
             pages.append(text)
     return "\n\n".join(pages)
+
+
+def parse_activity_bank_from_pdf(pdf_bytes: bytes) -> list[ActivityBullet]:
+    """Parse a PDF resume into ActivityBullet objects by extracting work experience bullets.
+
+    Uses AI to decompose each resume bullet into Situation, Action, Impact format.
+    """
+    from core.ai_engine import parse_resume_to_activities
+
+    pdf_text = _extract_text_from_pdf(pdf_bytes)
+    if not pdf_text.strip():
+        raise ValueError("Could not extract any text from the PDF. The file may be image-based or corrupted.")
+
+    raw_activities = parse_resume_to_activities(pdf_text)
+    activities = []
+    for i, row in enumerate(raw_activities):
+        activities.append(
+            ActivityBullet(
+                bullet_id=_make_bullet_id(i),
+                situation=row.get("situation", ""),
+                action=row.get("action", ""),
+                impact=row.get("impact", ""),
+                job_title=row.get("job_title", ""),
+                company=row.get("company", ""),
+                dates_worked=row.get("dates_worked", ""),
+                location=row.get("location", ""),
+            )
+        )
+    return activities
+
+
+def _extract_text_from_docx(docx_bytes: bytes) -> str:
+    """Extract text from DOCX bytes using python-docx."""
+    import docx as python_docx
+    import io
+    doc = python_docx.Document(io.BytesIO(docx_bytes))
+    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+    return "\n".join(paragraphs)
+
+
+def parse_full_resume(file_bytes: bytes, filename: str) -> tuple:
+    """Parse a PDF or DOCX resume into (UserProfile, list[ActivityBullet], style_notes str).
+
+    Returns a 3-tuple: (UserProfile, list[ActivityBullet], style_notes)
+    """
+    from core.ai_engine import parse_resume_full
+
+    filename_lower = filename.lower()
+    if filename_lower.endswith(".docx"):
+        text = _extract_text_from_docx(file_bytes)
+    else:
+        text = _extract_text_from_pdf(file_bytes)
+
+    if not text.strip():
+        raise ValueError("Could not extract any text from the file. It may be image-based or corrupted.")
+
+    data = parse_resume_full(text)
+
+    # Build UserProfile
+    prof_data = data.get("profile", {})
+    edu_entries = []
+    for e in data.get("education", []):
+        edu_entries.append(EducationEntry(
+            school=e.get("school", ""),
+            degree=e.get("degree", ""),
+            field_of_study=e.get("field_of_study", ""),
+            location=e.get("location", ""),
+            start_date=e.get("start_date", ""),
+            end_date=e.get("end_date", ""),
+            gpa=e.get("gpa", ""),
+            description=e.get("description", ""),
+            bullets=e.get("bullets", []),
+        ))
+
+    profile = UserProfile(
+        name=prof_data.get("name", ""),
+        email=prof_data.get("email", ""),
+        phone=prof_data.get("phone", ""),
+        location=prof_data.get("location", ""),
+        linkedin=prof_data.get("linkedin", ""),
+        website=prof_data.get("website", ""),
+        summary=prof_data.get("summary", ""),
+        education=edu_entries,
+        skills=prof_data.get("skills", []),
+        awards=prof_data.get("awards", []),
+        certifications=prof_data.get("certifications", []),
+        sections=prof_data.get("sections", ["summary", "experience", "education", "skills"]),
+        style_notes=data.get("style_notes", ""),
+    )
+
+    # Build ActivityBullet list
+    activities = []
+    for i, row in enumerate(data.get("activities", [])):
+        activities.append(ActivityBullet(
+            bullet_id=_make_bullet_id(i),
+            entry_type=row.get("entry_type", "work"),
+            situation=row.get("situation", ""),
+            action=row.get("action", ""),
+            impact=row.get("impact", ""),
+            job_title=row.get("title", ""),
+            company=row.get("organization", ""),
+            dates_worked=row.get("dates", ""),
+            location=row.get("location", ""),
+        ))
+
+    style_notes = data.get("style_notes", "")
+    return profile, activities, style_notes
 
 
 def parse_resume_template_from_pdf(pdf_bytes: bytes) -> ResumeTemplate:
