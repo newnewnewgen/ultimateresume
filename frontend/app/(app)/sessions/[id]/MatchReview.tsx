@@ -111,7 +111,26 @@ export default function MatchReview({
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-zinc-900">{item.item}</p>
-                <p className="text-xs text-zinc-400 mt-0.5">{item.category}</p>
+                <p className="text-xs text-zinc-400 mt-0.5 capitalize">{item.category.replace(/_/g, " ")}</p>
+                {item.situation_description && (
+                  <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
+                    <span className="font-medium text-zinc-600">Context: </span>
+                    {item.situation_description}
+                  </p>
+                )}
+                {item.action_description && (
+                  <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
+                    <span className="font-medium text-zinc-600">Demonstrated by: </span>
+                    {item.action_description}
+                  </p>
+                )}
+                {item.ats_keywords?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {item.ats_keywords.slice(0, 6).map((kw) => (
+                      <span key={kw} className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500">{kw}</span>
+                    ))}
+                  </div>
+                )}
               </div>
               {selectedIds.length === 0 && (
                 <span className="text-xs text-amber-600 shrink-0">No selection</span>

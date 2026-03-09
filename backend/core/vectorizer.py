@@ -28,9 +28,9 @@ CONTEXT_WEIGHT = 0.15    # Job-title / domain context bonus
 
 def _get_client() -> genai.Client:
     """Return a configured Gemini client."""
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise EnvironmentError("GEMINI_API_KEY environment variable is not set.")
+        raise EnvironmentError("GEMINI_API_KEY or GOOGLE_API_KEY environment variable is not set.")
     return genai.Client(api_key=api_key)
 
 

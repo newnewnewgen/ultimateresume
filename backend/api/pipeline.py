@@ -197,6 +197,7 @@ def _to_activity_bullet(a: ActivityIn | ActivityOut) -> ActivityBullet:
         dates_worked=a.dates_worked,
         location=a.location,
         extracted_skills=list(a.extracted_skills),
+        vector=list(a.vector) if isinstance(a, ActivityOut) and a.vector else [],
     )
 
 
