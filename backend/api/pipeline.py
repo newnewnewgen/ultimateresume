@@ -101,6 +101,7 @@ class Step3Request(BaseModel):
     nice_to_have_skills: list[str]
     valued_qualities: list[str]
     holistic_person_definition: str
+    job_description_raw: str = ""
 
 
 class Step3Response(BaseModel):
@@ -289,6 +290,7 @@ async def step3(req: Step3Request):
     """Create ATS and Intent rubrics from a cleaned job description."""
     try:
         cleaned = CleanedJobDescription(
+            raw_text=req.job_description_raw,
             required_skills=req.required_skills,
             nice_to_have_skills=req.nice_to_have_skills,
             valued_qualities=req.valued_qualities,

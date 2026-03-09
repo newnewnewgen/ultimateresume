@@ -20,28 +20,37 @@ Distinguish clearly between hard requirements and nice-to-haves.
 """
 
 CREATE_ATS_RUBRIC = """\
-You are an expert ATS (Applicant Tracking System) analyst. Based on the following
-cleaned job description data, create a focused ATS scoring rubric.
+You are an expert ATS (Applicant Tracking System) analyst. Create a focused ATS scoring rubric
+from the job description below.
 
-REQUIRED SKILLS: {required_skills}
-NICE-TO-HAVE SKILLS: {nice_to_have_skills}
-VALUED QUALITIES: {valued_qualities}
+RAW JOB DESCRIPTION (primary source of truth — use exact language and specific requirements from here):
+---
+{job_description_raw}
+---
+
+PRE-EXTRACTED SKILLS (use as a starting checklist, but derive specificity from the raw JD above):
+  Required: {required_skills}
+  Nice-to-have: {nice_to_have_skills}
+  Valued qualities: {valued_qualities}
 
 CRITICAL RULES:
-1. GROUP related skills into a SINGLE rubric item. For example:
+1. Derive rubric items from the SPECIFIC requirements in the raw JD, not the pre-extracted summaries.
+   Use the exact behaviors, contexts, and outcomes the JD describes — not generic category names.
+   BAD item: "Product Management Experience"
+   GOOD item: "Cross-functional Roadmap Prioritization" (if the JD mentions roadmap ownership + stakeholder alignment)
+2. GROUP related skills into a SINGLE rubric item. For example:
    - "Docker" and "Kubernetes" and "containerization" → ONE item: "Containerization (Docker, Kubernetes)"
    - "Python" and "Go" and "Java" → ONE item: "Programming Languages (Python, Go, Java)"
    - "CI/CD" and "DevOps" and "automated deployment" → ONE item: "CI/CD & DevOps Practices"
-   - "communication skills" and "cross-functional collaboration" → ONE item: "Cross-Functional Communication"
-2. Each rubric item must represent a DISTINCT skill area — no two items should match the same resume bullet.
-3. Assign a priority tier to each item:
-   - "critical": Explicitly required — missing this likely means rejection
+3. Each rubric item must represent a DISTINCT skill area — no two items should match the same resume bullet.
+4. Assign a priority tier based on the JD's language:
+   - "critical": Explicitly required / "must have" — missing this likely means rejection
    - "important": Strongly preferred or implied as necessary
    - "nice_to_have": Bonus skills that differentiate candidates
-4. The "item" field should be a concise label, and "ats_keywords" should list ALL the specific
-   keywords/phrases an ATS would scan for within that group.
-
-For each item, also write it as a Situation (what is the task/challenge) and Action (ways to accomplish it).
+5. The "item" field should be specific and behavioral (what does success look like?), and "ats_keywords"
+   should list ALL the specific keywords/phrases an ATS would scan for within that group.
+6. situation_description: Frame it as the actual challenge the employer is hiring for (from the JD context).
+   action_description: Describe specific actions that would demonstrate competency (use JD language).
 
 Return EXACTLY this JSON format (no extra text):
 {{
@@ -50,17 +59,17 @@ Return EXACTLY this JSON format (no extra text):
       "rubric_id": "ATS-001",
       "category": "technical_skill|soft_skill|domain_knowledge|tool_platform|methodology",
       "priority": "critical|important|nice_to_have",
-      "item": "Concise skill group label",
+      "item": "Specific, behavioral skill label derived from JD language",
       "ats_keywords": ["keyword1", "keyword2", "keyword3"],
-      "situation_description": "A situation/task description framing this skill group",
-      "action_description": "Actions that demonstrate this skill group"
+      "situation_description": "The actual challenge/context from the JD that requires this skill",
+      "action_description": "Specific actions that demonstrate this skill, using JD language"
     }},
     ...
   ]
 }}
 
 Aim for 8-15 DISTINCT rubric items. Fewer, well-grouped items are better than many overlapping ones.
-Each item should map to a different type of work experience.
+Each item should map to a different type of work experience that the JD is explicitly looking for.
 """
 
 CREATE_INTENT_RUBRIC = """\

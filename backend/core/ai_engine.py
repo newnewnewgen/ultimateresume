@@ -171,6 +171,7 @@ def clean_job_description(raw_text: str) -> CleanedJobDescription:
 def create_ats_rubric(cleaned_jd: CleanedJobDescription) -> list[ATSRubricItem]:
     """Use AI to create an ATS scoring rubric from the cleaned JD."""
     prompt = CREATE_ATS_RUBRIC.format(
+        job_description_raw=cleaned_jd.raw_text or "(not provided)",
         required_skills=json.dumps(cleaned_jd.required_skills),
         nice_to_have_skills=json.dumps(cleaned_jd.nice_to_have_skills),
         valued_qualities=json.dumps(cleaned_jd.valued_qualities),
