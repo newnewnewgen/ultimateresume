@@ -266,7 +266,7 @@ def write_sti_statement(
         company=activity.company,
         extracted_skills=", ".join(activity.extracted_skills) if activity.extracted_skills else "Not available",
     )
-    return _call_gemini(prompt, max_output_tokens=512, use_pro=False).strip()
+    return _call_gemini(prompt, max_output_tokens=4096, use_pro=False).strip()
 
 
 def dedup_bullets(statements: list[dict]) -> list[dict]:
