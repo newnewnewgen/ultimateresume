@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import MatchReview from "./MatchReview";
+import RubricEditor from "./RubricEditor";
+import BulletEditor from "./BulletEditor";
 import ResumeEditor, { htmlToResumeText } from "./ResumeEditor";
 import type {
   Activity,
@@ -15,9 +17,11 @@ import type {
 type Stage =
   | "idle"
   | "analyzing"
+  | "rubric-review"
   | "matching"
   | "review"
   | "generating"
+  | "bullet-review"
   | "assembling"
   | "done";
 
@@ -47,7 +51,6 @@ async function apiFetch<T>(path: string, body: unknown): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    // Surface a friendly message when the backend is offline
     if (res.status === 0 || text.includes("ECONNREFUSED") || text === "") {
       throw new Error("Cannot reach the backend. Make sure it is running at " + API);
     }
@@ -57,11 +60,14 @@ async function apiFetch<T>(path: string, body: unknown): Promise<T> {
 }
 
 const PIPELINE_STAGES: { label: string; stages: Stage[] }[] = [
-  { label: "Analyze", stages: ["analyzing"] },
-  { label: "Match",   stages: ["matching"] },
-  { label: "Review",  stages: ["review"] },
-  { label: "Generate", stages: ["generating", "assembling"] },
-  { label: "Done",    stages: ["done"] },
+  { label: "Analyze",       stages: ["analyzing"] },
+  { label: "Rubric",        stages: ["rubric-review"] },
+  { label: "Match",         stages: ["matching"] },
+  { label: "Activities",    stages: ["review"] },
+  { label: "Generate",      stages: ["generating"] },
+  { label: "Bullets",       stages: ["bullet-review"] },
+  { label: "Assemble",      stages: ["assembling"] },
+  { label: "Done",          stages: ["done"] },
 ];
 
 export default function PipelineRunner({ sessionId, session, activities, profile }: Props) {
@@ -98,29 +104,28 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     await supabase.from("pipeline_sessions").update(updates).eq("id", sessionId);
   }
 
-  // ── Custom bullet handler ────────────────────────────────────────────────────
+  // ── Custom activity handler ──────────────────────────────────────────────────
 
-  function handleCustomBullet(rubricId: string, bulletId: string, text: string) {
-    const fakeActivity: Activity = {
-      bullet_id: bulletId,
-      entry_type: "work",
-      job_title: "Custom",
-      company: "",
-      dates_worked: "",
-      location: "",
-      situation: "",
-      action: text,
-      impact: "",
+  function handleCustomBullet(rubricId: string, bulletId: string, draft: { job_title: string; company: string; dates_worked: string; location: string; situation: string; action: string; impact: string }) {
+    const activity: Activity = {
+      bullet_id:        bulletId,
+      entry_type:       "work",
+      job_title:        draft.job_title || "Custom",
+      company:          draft.company,
+      dates_worked:     draft.dates_worked,
+      location:         draft.location,
+      situation:        draft.situation,
+      action:           draft.action,
+      impact:           draft.impact,
       extracted_skills: [],
     };
     setCustomActivities((prev) => {
-      // Replace any previous custom for this rubric
       const filtered = prev.filter((a) => !a.bullet_id.startsWith(`custom_${rubricId}`));
-      return [...filtered, fakeActivity];
+      return [...filtered, activity];
     });
   }
 
-  // ── Stage 1: Analyze + vectorize ──────────────────────────────────────────
+  // ── Step 1+2+3: Analyze ──────────────────────────────────────────────────
 
   async function runAnalysis() {
     if (activities.length === 0) {
@@ -153,8 +158,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
             supabase
               .from("activities")
               .update({ embedding: a.vector })
-              .eq("user_id", (supabase as unknown as { auth: { getUser: () => Promise<{ data: { user: { id: string } | null } }> } }).auth)
-              // Use bullet_id since we don't have the DB id here
               .eq("bullet_id", a.bullet_id)
           )
         ).catch(() => {/* non-fatal */});
@@ -167,28 +170,44 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       const step3Result = await apiFetch<{
         ats_rubric: ATSRubricItem[];
         intent_rubric: IntentRubric;
-      }>("/api/pipeline/step3", step2Result);
+      }>("/api/pipeline/step3", {
+        ...step2Result,
+        job_description_raw: session.job_description_raw,
+      });
 
       setAtsRubric(step3Result.ats_rubric);
       setIntentRubric(step3Result.intent_rubric);
-      addLog(`✓ Created ${step3Result.ats_rubric.length} rubric items`);
+      addLog(`✓ Created ${step3Result.ats_rubric.length} rubric items — review them below`);
 
       await save({
-        cleaned_jd: step2Result,
-        ats_rubric: step3Result.ats_rubric,
+        cleaned_jd:    step2Result,
+        ats_rubric:    step3Result.ats_rubric,
         intent_rubric: step3Result.intent_rubric,
-        current_step: 3,
+        current_step:  3,
       });
 
-      setStage("matching");
-      addLog("Matching activities to rubric items…");
+      setStage("rubric-review");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Pipeline failed");
+      setStage("idle");
+    }
+  }
 
+  // ── Step 4: Match (called after rubric review) ───────────────────────────
+
+  async function runMatching(confirmedRubric: ATSRubricItem[]) {
+    setError(null);
+    setAtsRubric(confirmedRubric);
+    setStage("matching");
+    addLog("Matching activities to rubric items…");
+
+    try {
       const step4Result = await apiFetch<{
         ats_rubric: ATSRubricItem[];
         matches: Record<string, VectorMatch[]>;
       }>("/api/pipeline/step4", {
-        ats_rubric: step3Result.ats_rubric,
-        activities: step1Result.activities,
+        ats_rubric: confirmedRubric,
+        activities: vectorizedActivities.length > 0 ? vectorizedActivities : activities,
         top_k: 5,
       });
 
@@ -197,26 +216,27 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
       const defaultSelections: Record<string, string[]> = {};
       for (const [rId, vmList] of Object.entries(step4Result.matches)) {
-        if (vmList.length > 0) defaultSelections[rId] = [vmList[0].bullet_id];
+        const good = vmList.filter((m) => m.similarity_score >= 0.5);
+        defaultSelections[rId] = good.length > 0 ? good.map((m) => m.bullet_id) : [];
       }
       setSelections(defaultSelections);
-      addLog(`✓ Matched — review your selections below`);
+      addLog("✓ Matched — review your activity selections below");
 
       await save({
-        ats_rubric: step4Result.ats_rubric,
+        ats_rubric:     step4Result.ats_rubric,
         vector_matches: step4Result.matches,
-        selections: defaultSelections,
-        current_step: 4,
+        selections:     defaultSelections,
+        current_step:   4,
       });
 
       setStage("review");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Pipeline failed");
-      setStage("idle");
+      setError(err instanceof Error ? err.message : "Matching failed");
+      setStage("rubric-review");
     }
   }
 
-  // ── Stage 2: Generate + assemble ─────────────────────────────────────────
+  // ── Step 5: Generate bullets ─────────────────────────────────────────────
 
   async function runGeneration() {
     setError(null);
@@ -232,21 +252,34 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       const step5Result = await apiFetch<{ statements: Statement[] }>(
         "/api/pipeline/step5",
         {
-          ats_rubric: atsRubric,
-          activities: sourceActivities,
+          ats_rubric:      atsRubric,
+          activities:      sourceActivities,
           selections,
           holistic_person: intentRubric?.holistic_summary ?? "",
         }
       );
 
       const ok = step5Result.statements.filter((s) => s.statement && !s.error).length;
-      addLog(`✓ Generated ${ok} bullets`);
+      addLog(`✓ Generated ${ok} bullets — review and edit below`);
       setStatements(step5Result.statements);
       await save({ statements: step5Result.statements, current_step: 5 });
 
-      setStage("assembling");
-      addLog("Assembling ATS resume…");
+      setStage("bullet-review");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Generation failed");
+      setStage("review");
+    }
+  }
 
+  // ── Steps 6+7: Assemble (called after bullet review) ────────────────────
+
+  async function runAssembly(confirmedStatements: Statement[]) {
+    setError(null);
+    setStatements(confirmedStatements);
+    setStage("assembling");
+    addLog("Assembling ATS resume…");
+
+    try {
       const template = {
         name:     profile?.name     ?? "",
         email:    profile?.email    ?? "",
@@ -259,9 +292,9 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
       const step6Result = await apiFetch<{ ats_resume: string }>("/api/pipeline/step6", {
         template,
-        statements: step5Result.statements,
-        role_context:     session.title ?? "",
-        holistic_person:  intentRubric?.holistic_summary ?? "",
+        statements:          confirmedStatements,
+        role_context:        session.title ?? "",
+        holistic_person:     intentRubric?.holistic_summary ?? "",
         consolidated_skills: [],
       });
 
@@ -285,8 +318,8 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
       setStage("done");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Generation failed");
-      setStage("review");
+      setError(err instanceof Error ? err.message : "Assembly failed");
+      setStage("bullet-review");
     }
   }
 
@@ -364,29 +397,29 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     setTimeout(() => setCopyLabel("Copy"), 2000);
   }
 
-  // ── Render helpers ────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
 
   const currentStepIdx = PIPELINE_STAGES.findIndex((s) => s.stages.includes(stage));
-  const resumeName = session.title || profile?.name || "resume";
-  const activeResume = resumeTab === "final" ? finalResume : atsResume;
+  const resumeName     = session.title || profile?.name || "resume";
+  const activeResume   = resumeTab === "final" ? finalResume : atsResume;
 
   return (
     <div className="flex flex-col gap-6">
 
       {/* Step progress bar */}
       {stage !== "idle" && (
-        <div className="flex items-center gap-1.5 flex-wrap" data-no-print>
+        <div className="flex items-center gap-1 flex-wrap" data-no-print>
           {PIPELINE_STAGES.map((step, i) => (
-            <div key={step.label} className="flex items-center gap-1.5">
-              <span className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            <div key={step.label} className="flex items-center gap-1">
+              <span className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
                 step.stages.includes(stage) ? "bg-zinc-900 text-white" :
-                i < currentStepIdx        ? "bg-zinc-100 text-zinc-500" :
-                                            "bg-zinc-50 text-zinc-400"
+                i < currentStepIdx         ? "bg-zinc-100 text-zinc-500" :
+                                             "bg-zinc-50 text-zinc-400"
               }`}>
                 {i < currentStepIdx ? "✓ " : ""}{step.label}
               </span>
               {i < PIPELINE_STAGES.length - 1 && (
-                <span className="text-zinc-300 text-xs">→</span>
+                <span className="text-zinc-300 text-xs">›</span>
               )}
             </div>
           ))}
@@ -424,20 +457,42 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         </div>
       )}
 
-      {/* ── ANALYZING / MATCHING ── */}
-      {(stage === "analyzing" || stage === "matching") && (
+      {/* ── ANALYZING ── */}
+      {stage === "analyzing" && (
         <div className="bg-white rounded-xl border border-zinc-200 p-6">
           <div className="flex items-center gap-3 mb-4">
             <Spinner />
-            <span className="text-sm font-medium text-zinc-700">
-              {stage === "analyzing" ? "Analyzing job description…" : "Matching activities to requirements…"}
-            </span>
+            <span className="text-sm font-medium text-zinc-700">Analyzing job description…</span>
           </div>
           <LogLines lines={log} />
         </div>
       )}
 
-      {/* ── REVIEW ── */}
+      {/* ── RUBRIC REVIEW ── */}
+      {stage === "rubric-review" && (
+        <div className="flex flex-col gap-4">
+          {log.length > 0 && (
+            <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
+              <LogLines lines={log} />
+            </div>
+          )}
+          {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
+          <RubricEditor rubric={atsRubric} onConfirm={runMatching} />
+        </div>
+      )}
+
+      {/* ── MATCHING ── */}
+      {stage === "matching" && (
+        <div className="bg-white rounded-xl border border-zinc-200 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <Spinner />
+            <span className="text-sm font-medium text-zinc-700">Matching activities to requirements…</span>
+          </div>
+          <LogLines lines={log} />
+        </div>
+      )}
+
+      {/* ── ACTIVITY REVIEW ── */}
       {stage === "review" && (
         <div className="flex flex-col gap-4">
           {log.length > 0 && (
@@ -462,23 +517,45 @@ export default function PipelineRunner({ sessionId, session, activities, profile
               onClick={runGeneration}
               className="rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 transition-colors"
             >
-              Generate resume →
+              Generate bullets →
             </button>
             <span className="text-xs text-zinc-400">
-              {Object.values(selections).filter((v) => v.length > 0).length} / {atsRubric.length} rubric items selected
+              {Object.values(selections).filter((v) => v.length > 0).length} / {atsRubric.length} requirements matched
             </span>
           </div>
         </div>
       )}
 
-      {/* ── GENERATING / ASSEMBLING ── */}
-      {(stage === "generating" || stage === "assembling") && (
+      {/* ── GENERATING ── */}
+      {stage === "generating" && (
         <div className="bg-white rounded-xl border border-zinc-200 p-6">
           <div className="flex items-center gap-3 mb-4">
             <Spinner />
-            <span className="text-sm font-medium text-zinc-700">
-              {stage === "generating" ? "Generating bullets in parallel…" : "Assembling resume…"}
-            </span>
+            <span className="text-sm font-medium text-zinc-700">Generating bullets in parallel…</span>
+          </div>
+          <LogLines lines={log} />
+        </div>
+      )}
+
+      {/* ── BULLET REVIEW ── */}
+      {stage === "bullet-review" && (
+        <div className="flex flex-col gap-4">
+          {log.length > 0 && (
+            <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
+              <LogLines lines={log} />
+            </div>
+          )}
+          {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
+          <BulletEditor statements={statements} onConfirm={runAssembly} />
+        </div>
+      )}
+
+      {/* ── ASSEMBLING ── */}
+      {stage === "assembling" && (
+        <div className="bg-white rounded-xl border border-zinc-200 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <Spinner />
+            <span className="text-sm font-medium text-zinc-700">Assembling resume…</span>
           </div>
           <LogLines lines={log} />
         </div>
@@ -487,7 +564,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       {/* ── DONE ── */}
       {stage === "done" && (
         <div className="flex flex-col gap-4">
-          {/* Toolbar */}
           <div className="flex items-center gap-2 flex-wrap" data-no-print>
             <button onClick={() => setResumeTab("final")}
               className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${resumeTab === "final" ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"}`}>
@@ -497,52 +573,37 @@ export default function PipelineRunner({ sessionId, session, activities, profile
               className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${resumeTab === "ats" ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"}`}>
               ATS version
             </button>
-
             <span className="flex-1" />
-
-            <button
-              onClick={() => handleCopy(activeResume)}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
-            >
+            <button onClick={() => handleCopy(activeResume)}
+              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors">
               {copyLabel}
             </button>
-            <button
-              onClick={() => handlePrintPDF(activeResume, resumeName)}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
-            >
+            <button onClick={() => handlePrintPDF(activeResume, resumeName)}
+              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors">
               Save as PDF
             </button>
-            <button
-              onClick={() => handleDownloadDocx(activeResume, resumeName)}
-              disabled={exporting}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 transition-colors"
-            >
+            <button onClick={() => handleDownloadDocx(activeResume, resumeName)} disabled={exporting}
+              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 transition-colors">
               {exporting ? "Exporting…" : "Download DOCX"}
             </button>
           </div>
 
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
-          {/* WYSIWYG editor */}
           <ResumeEditor
             content={activeResume}
             onChange={(text) => {
-              if (resumeTab === "final") {
-                setFinalResume(text);
-                save({ final_resume: text });
-              } else {
-                setAtsResume(text);
-                save({ ats_resume: text });
-              }
+              if (resumeTab === "final") { setFinalResume(text); save({ final_resume: text }); }
+              else                       { setAtsResume(text);   save({ ats_resume: text });   }
             }}
           />
 
           <button
-            onClick={() => { setStage("review"); setLog([]); setError(null); }}
+            onClick={() => { setStage("bullet-review"); setError(null); }}
             className="self-start text-sm text-zinc-400 hover:text-zinc-700 underline transition-colors"
             data-no-print
           >
-            ← Back to match review
+            ← Back to bullet review
           </button>
         </div>
       )}

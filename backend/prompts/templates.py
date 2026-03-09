@@ -47,10 +47,25 @@ CRITICAL RULES:
    - "critical": Explicitly required / "must have" — missing this likely means rejection
    - "important": Strongly preferred or implied as necessary
    - "nice_to_have": Bonus skills that differentiate candidates
-5. The "item" field should be specific and behavioral (what does success look like?), and "ats_keywords"
-   should list ALL the specific keywords/phrases an ATS would scan for within that group.
-6. situation_description: Frame it as the actual challenge the employer is hiring for (from the JD context).
-   action_description: Describe specific actions that would demonstrate competency (use JD language).
+5. The "item" field should be specific and behavioral (what does success look like?).
+6. "ats_keywords" must contain TWO layers of terms — combine them into one flat list:
+   LAYER 1 — Exact JD terms: The specific words/phrases that appear in the job description.
+     Include every variant the JD uses (e.g. "product roadmap", "roadmap prioritization", "roadmapping").
+   LAYER 2 — Semantic variants: Common synonyms, adjacent concepts, and industry-standard alternatives
+     that a strong candidate would use in their resume even if those exact words aren't in the JD.
+     Think: what would an experienced practitioner write instead?
+     Examples:
+       - JD says "stakeholder alignment" → also add: "executive communication", "cross-functional collaboration",
+         "buy-in", "influence without authority", "stakeholder management"
+       - JD says "data-driven decisions" → also add: "analytics", "A/B testing", "metrics", "KPIs",
+         "quantitative analysis", "experimentation"
+       - JD says "Python" → also add: "pandas", "NumPy", "scripting", "automation", "data pipelines"
+       - JD says "agile" → also add: "scrum", "sprint planning", "kanban", "iterative development"
+     The goal: if a candidate demonstrably HAS this skill but uses different vocabulary, they still match.
+   Target 8-15 keywords per rubric item, mixing exact and semantic variants.
+7. situation_description: Frame it as the actual challenge the employer is hiring for (from the JD context).
+   action_description: Describe specific actions that demonstrate competency, using JD language plus
+   common practitioner language.
 
 Return EXACTLY this JSON format (no extra text):
 {{
@@ -60,9 +75,9 @@ Return EXACTLY this JSON format (no extra text):
       "category": "technical_skill|soft_skill|domain_knowledge|tool_platform|methodology",
       "priority": "critical|important|nice_to_have",
       "item": "Specific, behavioral skill label derived from JD language",
-      "ats_keywords": ["keyword1", "keyword2", "keyword3"],
+      "ats_keywords": ["exact JD term", "JD synonym", "semantic variant", "practitioner alternative", "..."],
       "situation_description": "The actual challenge/context from the JD that requires this skill",
-      "action_description": "Specific actions that demonstrate this skill, using JD language"
+      "action_description": "Specific actions that demonstrate this skill, using JD + practitioner language"
     }},
     ...
   ]
