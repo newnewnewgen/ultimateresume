@@ -283,7 +283,7 @@ def dedup_bullets(statements: list[dict]) -> list[dict]:
     bullets_input = [{"id": str(i), "text": s["statement"]} for i, s in successful]
     prompt = DEDUP_BULLETS.format(bullets_json=json.dumps(bullets_input, indent=2))
     try:
-        response = _call_gemini(prompt, max_output_tokens=4096, json_mode=True)
+        response = _call_gemini(prompt, max_output_tokens=16384, json_mode=True)
         data = _extract_json(response)
     except Exception:
         return statements  # dedup failure is non-fatal — return originals
