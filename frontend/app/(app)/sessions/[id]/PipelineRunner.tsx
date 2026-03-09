@@ -86,6 +86,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   const [matches,              setMatches]              = useState<Record<string, VectorMatch[]>>(session.vector_matches ?? {});
   const [selections,           setSelections]           = useState<Record<string, string[]>>(session.selections ?? {});
   const [statements,           setStatements]           = useState<Statement[]>(session.statements ?? []);
+  const [customActivities,     setCustomActivities]     = useState<Activity[]>([]);
   const [atsResume,            setAtsResume]            = useState<string>(session.ats_resume ?? "");
   const [finalResume,          setFinalResume]          = useState<string>(session.final_resume ?? "");
 
@@ -95,6 +96,28 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
   async function save(updates: Record<string, unknown>) {
     await supabase.from("pipeline_sessions").update(updates).eq("id", sessionId);
+  }
+
+  // ── Custom bullet handler ────────────────────────────────────────────────────
+
+  function handleCustomBullet(rubricId: string, bulletId: string, text: string) {
+    const fakeActivity: Activity = {
+      bullet_id: bulletId,
+      entry_type: "work",
+      job_title: "Custom",
+      company: "",
+      dates_worked: "",
+      location: "",
+      situation: "",
+      action: text,
+      impact: "",
+      extracted_skills: [],
+    };
+    setCustomActivities((prev) => {
+      // Replace any previous custom for this rubric
+      const filtered = prev.filter((a) => !a.bullet_id.startsWith(`custom_${rubricId}`));
+      return [...filtered, fakeActivity];
+    });
   }
 
   // ── Stage 1: Analyze + vectorize ──────────────────────────────────────────
@@ -201,9 +224,10 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     addLog("Generating resume bullets in parallel…");
 
     try {
-      const sourceActivities = vectorizedActivities.length > 0
-        ? vectorizedActivities
-        : activities;
+      const sourceActivities = [
+        ...(vectorizedActivities.length > 0 ? vectorizedActivities : activities),
+        ...customActivities,
+      ];
 
       const step5Result = await apiFetch<{ statements: Statement[] }>(
         "/api/pipeline/step5",
@@ -425,9 +449,10 @@ export default function PipelineRunner({ sessionId, session, activities, profile
           <MatchReview
             atsRubric={atsRubric}
             matches={matches}
-            activities={activities}
+            activities={[...activities, ...customActivities]}
             selections={selections}
             onSelectionsChange={(s) => { setSelections(s); save({ selections: s }); }}
+            onCustomBullet={handleCustomBullet}
           />
 
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
