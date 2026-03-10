@@ -1,10 +1,9 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import ActivityBank from "./ActivityBank";
 
 export default async function ActivitiesPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const [user, supabase] = await Promise.all([getUser(), createClient()]);
   if (!user) redirect("/login");
 
   const [{ data: activities }, { data: profile }, { data: education }] = await Promise.all([

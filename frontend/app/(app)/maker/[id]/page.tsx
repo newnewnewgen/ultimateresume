@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import PipelineRunner from "./PipelineRunner";
@@ -9,8 +9,7 @@ export default async function SessionPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const [user, supabase] = await Promise.all([getUser(), createClient()]);
 
   const [{ data: session }, { data: activities }, { data: profile }, { data: education }] =
     await Promise.all([

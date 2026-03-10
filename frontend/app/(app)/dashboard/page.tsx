@@ -1,12 +1,11 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
 import Link from "next/link";
 import WelcomeBox from "./WelcomeBox";
 import RecentSessions from "./RecentSessions";
 import DashboardGreeting from "./DashboardGreeting";
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const [user, supabase] = await Promise.all([getUser(), createClient()]);
 
   const [{ count: activityCount }, { data: profile }, { data: sessions }] =
     await Promise.all([
