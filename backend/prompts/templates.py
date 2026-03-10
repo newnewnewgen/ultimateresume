@@ -541,29 +541,38 @@ Rules:
 """
 
 PARSE_RAW_TEXT_ACTIVITY = """\
-You are a resume writer. The user has pasted raw text describing a work experience, project,
-or accomplishment. Parse it into a structured STAR (Situation–Action–Impact) activity entry.
+You are a resume writer. The user has pasted raw text describing one or more work experiences,
+projects, or accomplishments. Parse it into a list of structured STAR (Situation–Action–Impact)
+activity entries — one entry per distinct role, project, or experience.
 
 RAW TEXT:
 {raw_text}
 
 Return EXACTLY this JSON (no extra text, no code fences):
 {{
-  "entry_type": "work|project|competition|volunteering|other",
-  "job_title": "role title or project name",
-  "company": "company / organization name, or empty string",
-  "dates_worked": "date range (e.g. Jan 2022 – Mar 2024), or empty string",
-  "location": "city, state or remote, or empty string",
-  "situation": "1–2 sentences: What was the context, challenge, or problem?",
-  "action": "1–3 sentences: What did YOU specifically do? Use strong action verbs.",
-  "impact": "1–2 sentences: What was the measurable outcome? Include numbers if present.",
-  "extracted_skills": ["skill1", "skill2", "..."]
+  "activities": [
+    {{
+      "entry_type": "work|project|competition|volunteering|other",
+      "job_title": "role title or project name",
+      "company": "company / organization name, or empty string",
+      "dates_worked": "date range (e.g. Jan 2022 – Mar 2024), or empty string",
+      "location": "city, state or remote, or empty string",
+      "situation": "1–2 sentences: What was the context, challenge, or problem?",
+      "action": "1–3 sentences: What did YOU specifically do? Use strong action verbs.",
+      "impact": "1–2 sentences: What was the measurable outcome? Include numbers if present.",
+      "extracted_skills": ["skill1", "skill2", "..."]
+    }}
+  ]
 }}
 
 Rules:
-- Extract all concrete details from the text; do not fabricate information not implied by the text.
-- Infer entry_type from context (e.g. "internship at Apple" → "work", "side project" → "project").
-- Leave fields as empty string if genuinely not present or inferable.
-- extracted_skills: list 3–10 specific skills, tools, or technologies mentioned or clearly implied.
+- Create ONE entry per distinct role, project, or experience described.
+- If the text describes a single experience, return an array with exactly one item.
+- If multiple experiences are described (e.g. multiple jobs, projects, or bullet sets for
+  different roles), split them into separate entries.
+- Group bullet points that clearly belong to the same role/project into one entry.
+- Do not fabricate details not implied by the text; leave fields as "" if genuinely unknown.
+- Infer entry_type from context (internship → "work", side project → "project", etc.).
+- extracted_skills: 3–10 specific skills, tools, or technologies per entry.
 - Write situation/action/impact as polished resume-style prose (past tense, active voice).
 """

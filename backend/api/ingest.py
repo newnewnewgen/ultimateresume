@@ -143,26 +143,29 @@ class ParseTextActivityResponse(BaseModel):
     extracted_skills: list[str]
 
 
-@router.post("/text-activity", response_model=ParseTextActivityResponse)
+@router.post("/text-activity", response_model=list[ParseTextActivityResponse])
 async def parse_text_activity(req: ParseTextActivityRequest):
-    """Parse raw pasted text into a structured STAR activity entry."""
+    """Parse raw pasted text into one or more structured STAR activity entries."""
     if not req.text.strip():
         raise HTTPException(400, "Text cannot be empty")
     try:
-        result = parse_raw_text_to_activity(req.text)
+        results = parse_raw_text_to_activity(req.text)
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
-    return ParseTextActivityResponse(
-        entry_type=result.get("entry_type", "work"),
-        job_title=result.get("job_title", ""),
-        company=result.get("company", ""),
-        dates_worked=result.get("dates_worked", ""),
-        location=result.get("location", ""),
-        situation=result.get("situation", ""),
-        action=result.get("action", ""),
-        impact=result.get("impact", ""),
-        extracted_skills=result.get("extracted_skills", []),
-    )
+    return [
+        ParseTextActivityResponse(
+            entry_type=r.get("entry_type", "work"),
+            job_title=r.get("job_title", ""),
+            company=r.get("company", ""),
+            dates_worked=r.get("dates_worked", ""),
+            location=r.get("location", ""),
+            situation=r.get("situation", ""),
+            action=r.get("action", ""),
+            impact=r.get("impact", ""),
+            extracted_skills=r.get("extracted_skills", []),
+        )
+        for r in results
+    ]
 
 
 @router.post("/activity-bank", response_model=list[ActivityOut])

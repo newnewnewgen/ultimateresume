@@ -256,8 +256,6 @@ export default function ActivityBank({
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadCount, setUploadCount] = useState<number | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const firstTimeFileRef = useRef<HTMLInputElement>(null);
 
   const [isFirstTime] = useState(!initialProfile?.name && initialActivities.length === 0);
@@ -349,6 +347,16 @@ export default function ActivityBank({
     }
   }, [activities, supabase, userId]);
 
+  const saveActivities = useCallback(async (items: Omit<Activity, "id">[]) => {
+    const toInsert = items.map((a) => ({ user_id: userId, ...a }));
+    const { data: inserted, error } = await supabase
+      .from("activities")
+      .insert(toInsert)
+      .select("id, bullet_id, entry_type, job_title, company, dates_worked, location, situation, action, impact, extracted_skills");
+    if (error) throw new Error(error.message);
+    setActivities((prev) => [...(inserted ?? []), ...prev]);
+  }, [supabase, userId]);
+
   // ── Update (from inline table edit) ──────────────────────────────────────
 
   async function updateActivity(updated: Activity) {
@@ -370,12 +378,11 @@ export default function ActivityBank({
 
   // ── Upload resume → parse ─────────────────────────────────────────────────
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>, mode: "firsttime" | "returning") {
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
     setUploadError(null);
-    setUploadCount(null);
 
     try {
       const form = new FormData();
@@ -422,17 +429,11 @@ export default function ActivityBank({
         extracted_skills: a.extracted_skills ?? [],
       }));
 
-      if (mode === "firsttime") {
+      // First-time: show full review panel
+      // Returning: show profile offer, don't re-insert (user may already have activities)
+      if (isFirstTime) {
         setReviewData({ profile: profileData, education: educationData, activities: activitiesData });
       } else {
-        const toInsert = activitiesData.map((a) => ({ user_id: userId, ...a }));
-        const { data: inserted, error } = await supabase
-          .from("activities")
-          .insert(toInsert)
-          .select("id, bullet_id, entry_type, job_title, company, dates_worked, location, situation, action, impact, extracted_skills");
-        if (error) throw new Error(error.message);
-        setActivities((prev) => [...(inserted ?? []), ...prev]);
-        setUploadCount(inserted?.length ?? 0);
         if (profileData.name || (profileData.skills?.length ?? 0) > 0) {
           setParsedProfileOffer({ profile: profileData, education: educationData });
         }
@@ -441,7 +442,6 @@ export default function ActivityBank({
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
       if (firstTimeFileRef.current) firstTimeFileRef.current.value = "";
     }
   }
@@ -466,7 +466,7 @@ export default function ActivityBank({
         <div className="flex flex-col items-center gap-3">
           <label className={`rounded-xl bg-zinc-900 px-6 py-3 text-sm font-medium text-white hover:bg-zinc-700 transition-colors cursor-pointer ${uploading ? "opacity-50 pointer-events-none" : ""}`}>
             {uploading ? "Parsing your resume…" : "Upload your resume"}
-            <input ref={firstTimeFileRef} type="file" accept=".pdf,.docx" className="hidden" onChange={(e) => handleUpload(e, "firsttime")} />
+            <input ref={firstTimeFileRef} type="file" accept=".pdf,.docx" className="hidden" onChange={handleUpload} />
           </label>
           {uploadError && <p className="text-sm text-red-600">{uploadError}</p>}
           <button onClick={() => setStartedManually(true)} className="text-sm text-zinc-400 hover:text-zinc-600 transition-colors">
@@ -527,14 +527,6 @@ export default function ActivityBank({
           + Add from text
         </button>
 
-        <label className={`rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors cursor-pointer ${uploading ? "opacity-50 pointer-events-none" : ""}`}>
-          {uploading ? "Parsing…" : "Add from resume"}
-          <input ref={fileRef} type="file" accept=".pdf,.docx" className="hidden" onChange={(e) => handleUpload(e, "returning")} />
-        </label>
-
-        {uploadCount !== null && (
-          <span className="text-sm text-green-600">✓ Added {uploadCount} {uploadCount === 1 ? "entry" : "entries"}</span>
-        )}
         {uploadError && (
           <span className="text-sm text-red-600 max-w-xs truncate" title={uploadError}>{uploadError}</span>
         )}
@@ -612,8 +604,7 @@ export default function ActivityBank({
       {pasteModalOpen && (
         <PasteTextModal
           onClose={() => setPasteModalOpen(false)}
-          onSave={saveActivity}
-          genBulletId={genBulletId}
+          onSave={saveActivities}
         />
       )}
     </div>

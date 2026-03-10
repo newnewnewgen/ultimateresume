@@ -450,12 +450,13 @@ def edit_latex_with_ai(latex: str, instruction: str) -> str:
     return _call_gemini(prompt, max_output_tokens=8192, use_pro=False).strip()
 
 
-def parse_raw_text_to_activity(raw_text: str) -> dict:
-    """Parse free-form text into a structured STAR activity dict."""
+def parse_raw_text_to_activity(raw_text: str) -> list[dict]:
+    """Parse free-form text into a list of structured STAR activity dicts."""
     prompt = PARSE_RAW_TEXT_ACTIVITY.format(raw_text=raw_text)
-    result = _call_gemini(prompt, max_output_tokens=2048, json_mode=True)
+    result = _call_gemini(prompt, max_output_tokens=4096, json_mode=True)
     cleaned = result.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    return json.loads(cleaned)
+    parsed = json.loads(cleaned)
+    return parsed.get("activities", [])
 
 
 def assemble_latex_resume(latex_template: str, resume_text: str, profile: dict) -> str:
