@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   DEFAULT_DESIGN,
-  elementToCSS,
-  type ElementStyle,
+  SIMPLE_DESIGN,
+  MODERN_DESIGN,
   type ResumeDesign,
   type SectionDef,
 } from "@/lib/design";
@@ -75,237 +75,114 @@ function buildDummyText(sections: SectionDef[]): string {
     if (!sec.enabled) continue;
     const block = DUMMY_BLOCKS[sec.id];
     if (!block) continue;
-    // Section header must be ALL CAPS with no digits for heuristic to match
     const header = /\d/.test(sec.label) ? sec.id.toUpperCase() : sec.label.toUpperCase();
     lines.push(header, ...block);
   }
   return lines.join("\n");
 }
 
-// ── Font options ───────────────────────────────────────────────────────────────
+// ── Template preview card ──────────────────────────────────────────────────────
 
-const FONTS = [
-  { label: "Georgia",       value: "Georgia, 'Times New Roman', serif" },
-  { label: "Times New Roman", value: "'Times New Roman', Georgia, serif" },
-  { label: "Arial",         value: "Arial, Helvetica, sans-serif" },
-  { label: "Helvetica",     value: "Helvetica, Arial, sans-serif" },
-  { label: "Garamond",      value: "Garamond, 'EB Garamond', serif" },
-  { label: "Palatino",      value: "Palatino, 'Palatino Linotype', serif" },
-  { label: "Calibri",       value: "Calibri, Candara, sans-serif" },
-  { label: "Trebuchet MS",  value: "'Trebuchet MS', sans-serif" },
-  { label: "Courier New",   value: "'Courier New', Courier, monospace" },
+const TEMPLATES: { id: "simple" | "modern"; label: string; description: string; design: ResumeDesign }[] = [
+  {
+    id: "simple",
+    label: "Simple",
+    description: "Classic serif — Jake's resume style",
+    design: SIMPLE_DESIGN,
+  },
+  {
+    id: "modern",
+    label: "Modern",
+    description: "Clean sans-serif with blue accents",
+    design: MODERN_DESIGN,
+  },
 ];
 
-// ── Element definitions ────────────────────────────────────────────────────────
-
-type ElementKey = keyof ResumeDesign["elements"];
-
-const ELEMENT_DEFS: {
-  key: ElementKey;
-  label: string;
-  sample: string;
-  extras?: ("align" | "transform" | "letterSpacing")[];
-}[] = [
-  { key: "nameContact",     label: "Name & Contact",          sample: "Alexandra J. Morrison",                              extras: ["align"] },
-  { key: "sectionHeader",   label: "Section Headers",         sample: "EXPERIENCE",                                         extras: ["transform", "letterSpacing"] },
-  { key: "roleHeader",      label: "Work Role / Company",     sample: "Sr. Software Engineer  |  Acme Corp  |  2022–Present" },
-  { key: "educationHeader", label: "Education Header",        sample: "B.S. Computer Science  |  UC Berkeley  |  May 2019"  },
-  { key: "projectHeader",   label: "Project Header",          sample: "OpenMetrics  |  TypeScript, Go  |  2023"             },
-  { key: "volunteerHeader", label: "Volunteer Header",        sample: "Coding Instructor  |  Code for Good  |  2020–Present"},
-  { key: "skillsBlock",     label: "Skills Block",            sample: "Languages: TypeScript, Python, Go, SQL"              },
-  { key: "body",            label: "Body & Bullets",          sample: "• Architected a real-time pipeline, reducing latency by 62%" },
-];
-
-// ── Inline formatting toolbar ──────────────────────────────────────────────────
-
-function Toolbar({
-  value,
-  extras,
-  onChange,
-  accentColor,
-  showDividers,
-  onAccentChange,
-  onDividersChange,
-}: {
-  value: ElementStyle;
-  extras?: ("align" | "transform" | "letterSpacing")[];
-  onChange: (v: ElementStyle) => void;
-  accentColor?: string;
-  showDividers?: boolean;
-  onAccentChange?: (c: string) => void;
-  onDividersChange?: (v: boolean) => void;
-}) {
-  const set = (patch: Partial<ElementStyle>) => onChange({ ...value, ...patch });
-  const isBold = value.fontWeight === "700" || value.fontWeight === "bold";
+function TemplatePreview({ tDesign }: { tDesign: ResumeDesign }) {
+  const e = tDesign.elements;
+  const accent = tDesign.accentColor;
 
   return (
-    <div className="flex flex-col gap-2 pt-2.5 mt-2.5 border-t border-zinc-100">
-      {/* Font + size + bold + color */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <select
-          value={value.fontFamily}
-          onChange={(e) => set({ fontFamily: e.target.value })}
-          className="flex-1 min-w-0 rounded border border-zinc-200 bg-white text-xs px-1.5 py-1 text-zinc-800 focus:outline-none"
-          style={{ fontFamily: value.fontFamily }}
-        >
-          {FONTS.map((f) => (
-            <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>{f.label}</option>
-          ))}
-        </select>
-
-        <div className="flex items-center rounded border border-zinc-200 overflow-hidden bg-white">
-          <button type="button" onClick={() => set({ fontSize: Math.max(6, +(value.fontSize - 0.5).toFixed(1)) })}
-            className="px-1.5 py-1 text-xs text-zinc-500 hover:bg-zinc-50">−</button>
-          <span className="px-1.5 text-xs text-zinc-700 min-w-[36px] text-center">{value.fontSize}pt</span>
-          <button type="button" onClick={() => set({ fontSize: Math.min(72, +(value.fontSize + 0.5).toFixed(1)) })}
-            className="px-1.5 py-1 text-xs text-zinc-500 hover:bg-zinc-50">+</button>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => set({ fontWeight: isBold ? "400" : "700" })}
-          className={`w-7 h-7 rounded border text-xs font-bold transition-colors ${isBold ? "border-zinc-800 bg-zinc-800 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"}`}
-        >B</button>
-
-        <input
-          type="color"
-          value={value.color}
-          onChange={(e) => set({ color: e.target.value })}
-          className="h-7 w-9 cursor-pointer rounded border border-zinc-200 p-0.5"
-          title="Text color"
-        />
+    <div
+      className="bg-white rounded border border-zinc-100 overflow-hidden"
+      style={{ padding: "10px 12px", height: 148 }}
+    >
+      {/* Name */}
+      <div style={{
+        fontFamily:   e.nameContact.fontFamily,
+        fontSize:     13,
+        fontWeight:   e.nameContact.fontWeight,
+        color:        e.nameContact.color,
+        textAlign:    e.nameContact.textAlign as React.CSSProperties["textAlign"],
+        lineHeight:   1.2,
+        marginBottom: 2,
+        overflow:     "hidden",
+        whiteSpace:   "nowrap",
+        textOverflow: "ellipsis",
+      }}>
+        Alex Morrison
       </div>
 
-      {/* Alignment */}
-      {extras?.includes("align") && (
-        <div className="flex rounded border border-zinc-200 overflow-hidden">
-          {(["left", "center", "right"] as const).map((a) => (
-            <button key={a} type="button"
-              onClick={() => set({ textAlign: a })}
-              className={`flex-1 py-1 text-xs transition-colors ${value.textAlign === a ? "bg-zinc-800 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
-            >{a.charAt(0).toUpperCase() + a.slice(1)}</button>
-          ))}
-        </div>
-      )}
-
-      {/* Text transform + divider toggle */}
-      {extras?.includes("transform") && (
-        <div className="flex items-center gap-1.5">
-          <select value={value.textTransform} onChange={(e) => set({ textTransform: e.target.value })}
-            className="flex-1 rounded border border-zinc-200 bg-white text-xs px-1.5 py-1 focus:outline-none">
-            <option value="none">No transform</option>
-            <option value="uppercase">UPPERCASE</option>
-            <option value="capitalize">Capitalize</option>
-          </select>
-          {showDividers !== undefined && (
-            <label className="flex items-center gap-1 cursor-pointer shrink-0">
-              <div onClick={() => onDividersChange?.(!showDividers)}
-                className={`w-8 h-4 rounded-full transition-colors ${showDividers ? "bg-zinc-800" : "bg-zinc-200"}`}>
-                <div className={`w-3 h-3 bg-white rounded-full shadow transition-transform mt-0.5 mx-0.5 ${showDividers ? "translate-x-4" : ""}`} />
-              </div>
-              <span className="text-xs text-zinc-600">Divider</span>
-            </label>
-          )}
-        </div>
-      )}
-
-      {/* Letter spacing */}
-      {extras?.includes("letterSpacing") && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-zinc-500 shrink-0 w-24">Letter spacing</span>
-          <select value={value.letterSpacing} onChange={(e) => set({ letterSpacing: e.target.value })}
-            className="flex-1 rounded border border-zinc-200 bg-white text-xs px-1.5 py-1 focus:outline-none">
-            <option value="0em">None</option>
-            <option value="0.03em">Tight (0.03em)</option>
-            <option value="0.05em">Normal (0.05em)</option>
-            <option value="0.08em">Wide (0.08em)</option>
-            <option value="0.12em">Wider (0.12em)</option>
-          </select>
-        </div>
-      )}
-
-      {/* Accent color (section header only) */}
-      {extras?.includes("transform") && accentColor !== undefined && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-zinc-500 shrink-0 w-24">Divider color</span>
-          <input type="color" value={accentColor} onChange={(e) => onAccentChange?.(e.target.value)}
-            className="h-7 w-9 cursor-pointer rounded border border-zinc-200 p-0.5" />
-          <span className="text-xs text-zinc-400 font-mono">{accentColor}</span>
-        </div>
-      )}
-
-      {/* Line height */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs text-zinc-500 shrink-0 w-24">Line height</span>
-        <input type="range" min={1.0} max={2.5} step={0.05} value={value.lineHeight}
-          onChange={(e) => set({ lineHeight: Number(e.target.value) })} className="flex-1 accent-zinc-800" />
-        <span className="text-xs text-zinc-600 w-8 text-right">{value.lineHeight.toFixed(2)}</span>
+      {/* Contact */}
+      <div style={{
+        fontFamily:   e.body.fontFamily,
+        fontSize:     7,
+        color:        "#666",
+        textAlign:    e.nameContact.textAlign as React.CSSProperties["textAlign"],
+        marginBottom: 8,
+        overflow:     "hidden",
+        whiteSpace:   "nowrap",
+      }}>
+        alex@email.com · San Francisco, CA · linkedin.com/in/alex
       </div>
-    </div>
-  );
-}
 
-// ── Element type card ──────────────────────────────────────────────────────────
+      {/* Section header */}
+      <div style={{
+        fontFamily:    e.sectionHeader.fontFamily,
+        fontSize:      8,
+        fontWeight:    e.sectionHeader.fontWeight,
+        color:         e.sectionHeader.color,
+        textTransform: e.sectionHeader.textTransform as React.CSSProperties["textTransform"],
+        letterSpacing: e.sectionHeader.letterSpacing,
+        borderBottom:  tDesign.showDividers ? `1px solid ${accent}` : "none",
+        paddingBottom: 1,
+        marginBottom:  4,
+      }}>
+        Experience
+      </div>
 
-function ElementCard({
-  def, value, selected, onSelect, onChange,
-  accentColor, showDividers, onAccentChange, onDividersChange,
-}: {
-  def: typeof ELEMENT_DEFS[number];
-  value: ElementStyle;
-  selected: boolean;
-  onSelect: () => void;
-  onChange: (v: ElementStyle) => void;
-  accentColor: string;
-  showDividers: boolean;
-  onAccentChange: (c: string) => void;
-  onDividersChange: (v: boolean) => void;
-}) {
-  const css = elementToCSS(value);
-  const isSectionHeader = def.key === "sectionHeader";
+      {/* Role */}
+      <div style={{
+        fontFamily:   e.roleHeader.fontFamily,
+        fontSize:     8,
+        fontWeight:   e.roleHeader.fontWeight,
+        color:        e.roleHeader.color,
+        marginBottom: 3,
+        overflow:     "hidden",
+        whiteSpace:   "nowrap",
+        textOverflow: "ellipsis",
+      }}>
+        Software Engineer | Acme Corp | 2022–Present
+      </div>
 
-  return (
-    <div className={`rounded-lg border transition-all ${selected ? "border-zinc-400 shadow-sm bg-white" : "border-zinc-100 bg-zinc-50 hover:border-zinc-200 hover:bg-white"}`}>
-      {/* Clickable sample */}
-      <button type="button" onClick={onSelect} className="w-full text-left px-3 pt-2.5 pb-2.5 rounded-t-lg">
-        <div className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest mb-1.5 flex items-center justify-between">
-          <span>{def.label}</span>
-          <span className="text-zinc-300">{selected ? "▲" : "▼"}</span>
-        </div>
-        <div style={{
-          fontFamily:    css.fontFamily,
-          fontSize:      css.fontSize,
-          fontWeight:    css.fontWeight,
-          color:         css.color,
-          textTransform: css.textTransform,
-          letterSpacing: css.letterSpacing,
-          lineHeight:    css.lineHeight,
-          textAlign:     css.textAlign,
-          overflow:      "hidden",
-          textOverflow:  "ellipsis",
-          whiteSpace:    "nowrap",
+      {/* Bullets */}
+      {[
+        "• Built real-time data pipeline, reducing latency by 62%",
+        "• Led migration cutting deploy time by 40%",
+        "• Mentored 4 engineers through weekly code reviews",
+      ].map((b, i) => (
+        <div key={i} style={{
+          fontFamily:   e.bullet.fontFamily,
+          fontSize:     7.5,
+          color:        e.bullet.color,
+          lineHeight:   1.4,
+          overflow:     "hidden",
+          whiteSpace:   "nowrap",
+          textOverflow: "ellipsis",
         }}>
-          {def.sample}
+          {b}
         </div>
-        {isSectionHeader && showDividers && (
-          <div style={{ height: 1, background: accentColor, marginTop: 3 }} />
-        )}
-      </button>
-
-      {/* Inline toolbar */}
-      {selected && (
-        <div className="px-3 pb-3">
-          <Toolbar
-            value={value}
-            extras={def.extras}
-            onChange={onChange}
-            accentColor={isSectionHeader ? accentColor : undefined}
-            showDividers={isSectionHeader ? showDividers : undefined}
-            onAccentChange={isSectionHeader ? onAccentChange : undefined}
-            onDividersChange={isSectionHeader ? onDividersChange : undefined}
-          />
-        </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -316,36 +193,35 @@ interface Props {
   initialDesign: ResumeDesign | null;
 }
 
+// Paper width in px (matches max-w-[720px] in ResumeEditor)
+const PAPER_W = 720;
+
 export default function ResumeDesigner({ initialDesign }: Props) {
   const [design, setDesign] = useState<ResumeDesign>(
     initialDesign
       ? { ...DEFAULT_DESIGN, ...initialDesign, elements: { ...DEFAULT_DESIGN.elements, ...(initialDesign.elements ?? {}) } }
       : DEFAULT_DESIGN
   );
-  const [selectedElement, setSelectedElement] = useState<ElementKey | null>("sectionHeader");
-  const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState("");
-  const [parsing, setParsing] = useState(false);
+  const [saving,     setSaving]     = useState(false);
+  const [saveMsg,    setSaveMsg]    = useState("");
+  const [parsing,    setParsing]    = useState(false);
   const [paperScale, setPaperScale] = useState(0.75);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileRef    = useRef<HTMLInputElement>(null);
+  const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
-  const supabase = createClient();
-
-  // Compute paper width for scaling
-  const paperW = design.pageSize === "A4" ? 793 : 816;
+  const supabase   = createClient();
 
   // Scale paper to fit right panel using ResizeObserver
   useEffect(() => {
     const el = previewRef.current;
     if (!el) return;
     const observer = new ResizeObserver(([entry]) => {
-      const available = entry.contentRect.width - 64;
-      setPaperScale(Math.min(1, Math.max(0.3, available / paperW)));
+      const available = entry.contentRect.width - 48;
+      setPaperScale(Math.min(1, Math.max(0.3, available / PAPER_W)));
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [paperW]);
+  }, []);
 
   // Dummy resume text — regenerates when sections change
   const dummyText = useMemo(() => buildDummyText(design.sections), [design.sections]);
@@ -371,14 +247,20 @@ export default function ResumeDesigner({ initialDesign }: Props) {
     });
   }, [save]);
 
-  const updateElement = useCallback((key: ElementKey, val: ElementStyle) => {
-    setDesign((prev) => {
-      const next = { ...prev, elements: { ...prev.elements, [key]: val } };
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => save(next), 800);
-      return next;
-    });
-  }, [save]);
+  // Apply a preset template (preserves page setup + sections order)
+  const applyTemplate = useCallback((templateId: "simple" | "modern") => {
+    const t = templateId === "simple" ? SIMPLE_DESIGN : MODERN_DESIGN;
+    const next: ResumeDesign = {
+      ...design,
+      accentColor:  t.accentColor,
+      showDividers: t.showDividers,
+      elements:     t.elements,
+      templateId,
+    };
+    setDesign(next);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    save(next);
+  }, [design, save]);
 
   // Section helpers
   const moveSection = (idx: number, dir: -1 | 1) => {
@@ -472,8 +354,43 @@ export default function ResumeDesigner({ initialDesign }: Props) {
             </div>
           </div>
 
-          {/* ── Sections ── */}
+          {/* ── Style Templates ── */}
           <div className="px-4 py-3 border-b border-zinc-100">
+            <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Style</div>
+            <div className="flex gap-3">
+              {TEMPLATES.map((t) => {
+                const selected = design.templateId === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => applyTemplate(t.id)}
+                    className={`flex-1 flex flex-col rounded-lg border-2 overflow-hidden transition-all text-left ${
+                      selected
+                        ? "border-zinc-800 shadow-sm"
+                        : "border-zinc-200 hover:border-zinc-300"
+                    }`}
+                  >
+                    <TemplatePreview tDesign={t.design} />
+                    <div className={`px-2.5 py-1.5 flex items-center gap-1.5 ${selected ? "bg-zinc-800" : "bg-zinc-50"}`}>
+                      {selected && (
+                        <svg className="w-3 h-3 text-white shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                      <div>
+                        <p className={`text-xs font-semibold leading-none ${selected ? "text-white" : "text-zinc-800"}`}>{t.label}</p>
+                        <p className={`text-[9px] mt-0.5 leading-none ${selected ? "text-zinc-300" : "text-zinc-400"}`}>{t.description}</p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Sections ── */}
+          <div className="px-4 py-3">
             <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Sections</div>
             <div className="flex flex-col gap-1">
               {design.sections.map((sec, idx) => (
@@ -501,54 +418,17 @@ export default function ResumeDesigner({ initialDesign }: Props) {
             </div>
           </div>
 
-          {/* ── Typography / Element cards ── */}
-          <div className="px-4 py-3">
-            <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Typography</div>
-            <div className="flex flex-col gap-1.5">
-              {ELEMENT_DEFS.map((def) => (
-                <ElementCard
-                  key={def.key}
-                  def={def}
-                  value={design.elements[def.key]}
-                  selected={selectedElement === def.key}
-                  onSelect={() => setSelectedElement(selectedElement === def.key ? null : def.key)}
-                  onChange={(v) => {
-                    updateElement(def.key, v);
-                    // Keep bullet in sync with body
-                    if (def.key === "body") updateElement("bullet", v);
-                  }}
-                  accentColor={design.accentColor}
-                  showDividers={design.showDividers}
-                  onAccentChange={(c) => update({ accentColor: c })}
-                  onDividersChange={(v) => update({ showDividers: v })}
-                />
-              ))}
-            </div>
-            <button type="button"
-              onClick={() => { if (confirm("Reset all design settings to defaults?")) { setDesign(DEFAULT_DESIGN); save(DEFAULT_DESIGN); } }}
-              className="mt-4 text-xs text-zinc-400 hover:text-red-500 transition-colors">
-              Reset to defaults
-            </button>
-          </div>
-
         </div>
       </div>
 
       {/* ── Right: Scaled paper preview ── */}
-      <div ref={previewRef} className="flex-1 overflow-y-auto bg-zinc-200 flex flex-col items-center py-8 px-8">
-        {/* Scale the Tiptap editor to fit the panel */}
-        <div
-          style={{
-            transformOrigin: "top center",
-            transform: `scale(${paperScale})`,
-            // Correct layout height: transform doesn't affect DOM flow
-            marginBottom: (
-              // rough paper height estimate for layout correction
-              (design.pageSize === "A4" ? 1122 : 1056) * (paperScale - 1)
-            ),
-            width: "100%",
-          }}
-        >
+      {/*
+        Using CSS `zoom` instead of `transform: scale`:
+        zoom affects layout dimensions (element takes up zoom * naturalSize in the flow),
+        so the paper never gets squished when the panel narrows.
+      */}
+      <div ref={previewRef} className="flex-1 overflow-y-auto overflow-x-hidden bg-zinc-200 flex flex-col items-center py-8">
+        <div style={{ zoom: paperScale, width: PAPER_W, flexShrink: 0 }}>
           <ResumeEditor content={dummyText} readOnly design={design} />
         </div>
       </div>
