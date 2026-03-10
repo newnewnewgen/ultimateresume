@@ -14,10 +14,6 @@ import type {
   VectorMatch,
 } from "@/lib/api/types";
 
-type LogEntry =
-  | { type: "text"; msg: string }
-  | { type: "thinking"; label: string; content: string };
-
 type Stage =
   | "idle"
   | "analyzing"
@@ -98,7 +94,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     return "idle";
   });
 
-  const [log,        setLog]        = useState<LogEntry[]>([]);
   const [error,      setError]      = useState<string | null>(null);
   const [resumeTab,       setResumeTab]       = useState<"final" | "ats">("final");
   const [copyLabel,       setCopyLabel]       = useState("Copy");
@@ -116,15 +111,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   const [customActivities,     setCustomActivities]     = useState<Activity[]>([]);
   const [atsResume,            setAtsResume]            = useState<string>(session.ats_resume ?? "");
   const [finalResume,          setFinalResume]          = useState<string>(session.final_resume ?? "");
-
-  function addLog(msg: string) {
-    setLog((prev) => [...prev, { type: "text", msg }]);
-  }
-
-  function addThinking(label: string, content: string) {
-    if (!content.trim()) return;
-    setLog((prev) => [...prev, { type: "thinking", label, content }]);
-  }
 
   async function save(updates: Record<string, unknown>) {
     await supabase.from("pipeline_sessions").update(updates).eq("id", sessionId);
@@ -159,13 +145,9 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       return;
     }
     setError(null);
-    setLog((prev) => prev.length > 0 ? [...prev, { type: "text", msg: "─── New run ───" }] : []);
     setStage("analyzing");
 
     try {
-      addLog("Cleaning job description…");
-      addLog("Vectorizing activity bank…");
-
       const [step2Result, step1Result] = await Promise.all([
         apiFetch<{
           required_skills: string[];
@@ -190,8 +172,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       }
 
       setVectorizedActivities(step1Result.activities);
-      addLog(`✓ Found ${step2Result.required_skills.length} required skills`);
-      addLog("Building ATS and intent rubrics…");
 
       const step3Result = await apiFetch<{
         ats_rubric: ATSRubricItem[];
@@ -203,7 +183,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
       setAtsRubric(step3Result.ats_rubric);
       setIntentRubric(step3Result.intent_rubric);
-      addLog(`✓ Created ${step3Result.ats_rubric.length} rubric items — review them below`);
 
       await save({
         cleaned_jd:    step2Result,
@@ -225,7 +204,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     setError(null);
     setAtsRubric(confirmedRubric);
     setStage("matching");
-    addLog("Matching activities to rubric items…");
 
     try {
       const step4Result = await apiFetch<{
@@ -246,7 +224,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         defaultSelections[rId] = good.length > 0 ? good.map((m) => m.bullet_id) : [];
       }
       setSelections(defaultSelections);
-      addLog("✓ Matched — review your activity selections below");
 
       await save({
         ats_rubric:     step4Result.ats_rubric,
@@ -267,7 +244,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   async function runGeneration() {
     setError(null);
     setStage("generating");
-    addLog("Generating resume bullets in parallel…");
 
     try {
       const sourceActivities = [
@@ -285,9 +261,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         }
       );
 
-      const ok = step5Result.statements.filter((s) => s.statement && !s.error).length;
-      addLog(`✓ Generated ${ok} bullets — review and edit below`);
-      addThinking("Bullet generation", step5Result.thinking ?? "");
       setStatements(step5Result.statements);
       await save({ statements: step5Result.statements, current_step: 5 });
 
@@ -304,7 +277,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     setError(null);
     setStatements(confirmedStatements);
     setStage("assembling");
-    addLog("Assembling ATS resume…");
 
     try {
       const allActivities = vectorizedActivities.length > 0 ? vectorizedActivities : activities;
@@ -333,9 +305,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       });
 
       setAtsResume(step6Result.ats_resume);
-      addLog("✓ Resume assembled");
-      addThinking("Resume assembly", step6Result.thinking ?? "");
-      addLog("Applying intent rewrite…");
 
       const step7Result = await apiFetch<{ final_resume: string; thinking?: string }>("/api/pipeline/step7", {
         ats_resume:    step6Result.ats_resume,
@@ -344,8 +313,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       });
 
       setFinalResume(step7Result.final_resume);
-      addThinking("Intent alignment", step7Result.thinking ?? "");
-      addLog("✓ Done!");
 
       await save({
         ats_resume:   step6Result.ats_resume,
@@ -473,8 +440,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       const data: { polished_text: string; thinking?: string } = await result.json();
       if (resumeTab === "final") { setFinalResume(data.polished_text); save({ final_resume: data.polished_text }); }
       else                       { setAtsResume(data.polished_text);   save({ ats_resume: data.polished_text });   }
-      addLog(`✓ Polished: "${polishText.trim()}"`);
-      addThinking(`Polish: ${polishText.trim()}`, data.thinking ?? "");
       setPolishText("");
       setPolishOpen(false);
     } catch (err: unknown) {
@@ -513,11 +478,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         </div>
       )}
 
-      {/* Persistent activity log — always visible once there are entries */}
-      {log.length > 0 && (
-        <ActivityLog entries={log} />
-      )}
-
       {/* ── IDLE ── */}
       {stage === "idle" && (
         <div className="flex flex-col gap-4">
@@ -552,22 +512,16 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       {/* ── ANALYZING ── */}
       {stage === "analyzing" && (
         <div className="bg-white rounded-xl border border-zinc-200 p-6">
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3">
             <Spinner />
             <span className="text-sm font-medium text-zinc-700">Analyzing job description…</span>
           </div>
-          <LogLines entries={log} />
         </div>
       )}
 
       {/* ── RUBRIC REVIEW ── */}
       {stage === "rubric-review" && (
         <div className="flex flex-col gap-4">
-          {log.length > 0 && (
-            <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
-              <LogLines entries={log} />
-            </div>
-          )}
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
           <RubricEditor rubric={atsRubric} onConfirm={runMatching} />
         </div>
@@ -576,23 +530,16 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       {/* ── MATCHING ── */}
       {stage === "matching" && (
         <div className="bg-white rounded-xl border border-zinc-200 p-6">
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3">
             <Spinner />
             <span className="text-sm font-medium text-zinc-700">Matching activities to requirements…</span>
           </div>
-          <LogLines entries={log} />
         </div>
       )}
 
       {/* ── ACTIVITY REVIEW ── */}
       {stage === "review" && (
         <div className="flex flex-col gap-4">
-          {log.length > 0 && (
-            <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
-              <LogLines entries={log} />
-            </div>
-          )}
-
           <MatchReview
             atsRubric={atsRubric}
             matches={matches}
@@ -621,22 +568,16 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       {/* ── GENERATING ── */}
       {stage === "generating" && (
         <div className="bg-white rounded-xl border border-zinc-200 p-6">
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3">
             <Spinner />
             <span className="text-sm font-medium text-zinc-700">Generating bullets in parallel…</span>
           </div>
-          <LogLines entries={log} />
         </div>
       )}
 
       {/* ── BULLET REVIEW ── */}
       {stage === "bullet-review" && (
         <div className="flex flex-col gap-4">
-          {log.length > 0 && (
-            <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
-              <LogLines entries={log} />
-            </div>
-          )}
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
           <BulletEditor statements={statements} onConfirm={runAssembly} />
         </div>
@@ -645,11 +586,10 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       {/* ── ASSEMBLING ── */}
       {stage === "assembling" && (
         <div className="bg-white rounded-xl border border-zinc-200 p-6">
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3">
             <Spinner />
             <span className="text-sm font-medium text-zinc-700">Assembling resume…</span>
           </div>
-          <LogLines entries={log} />
         </div>
       )}
 
@@ -755,90 +695,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 function Spinner() {
   return (
     <div className="w-4 h-4 rounded-full border-2 border-zinc-900 border-t-transparent animate-spin shrink-0" />
-  );
-}
-
-/** Inline per-stage log — shows only plain text entries, no thinking blocks */
-function LogLines({ entries }: { entries: LogEntry[] }) {
-  const textEntries = entries.filter((e): e is { type: "text"; msg: string } => e.type === "text");
-  return (
-    <div className="flex flex-col gap-0.5">
-      {textEntries.map((e, i) => (
-        <p key={i} className="text-xs text-zinc-500 font-mono">{e.msg}</p>
-      ))}
-    </div>
-  );
-}
-
-/** Expandable thinking block */
-function ThinkingBlock({ label, content }: { label: string; content: string }) {
-  const [open, setOpen] = useState(false);
-  const wordCount = content.trim().split(/\s+/).length;
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-100 transition-colors"
-      >
-        <span className="text-zinc-400 text-xs font-mono shrink-0">{open ? "▾" : "▸"}</span>
-        <span className="text-xs font-medium text-zinc-500 truncate flex-1">
-          Thinking: {label}
-        </span>
-        <span className="text-xs text-zinc-400 shrink-0 font-mono">{wordCount} words</span>
-      </button>
-      {open && (
-        <div className="border-t border-zinc-200 px-3 py-3 max-h-[400px] overflow-y-auto">
-          <pre className="text-xs text-zinc-500 font-mono whitespace-pre-wrap leading-relaxed">
-            {content.trim()}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Persistent activity log — always visible, shows all entries including thinking */
-function ActivityLog({ entries }: { entries: LogEntry[] }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const hasThinking = entries.some((e) => e.type === "thinking");
-
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden" data-no-print>
-      <button
-        type="button"
-        onClick={() => setCollapsed((v) => !v)}
-        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-zinc-50 transition-colors border-b border-zinc-100"
-      >
-        <span className="text-zinc-400 text-xs font-mono">{collapsed ? "▸" : "▾"}</span>
-        <span className="text-xs font-semibold text-zinc-600 tracking-wide uppercase">
-          Activity log
-        </span>
-        {hasThinking && (
-          <span className="ml-1 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500">
-            includes AI thinking
-          </span>
-        )}
-      </button>
-
-      {!collapsed && (
-        <div className="px-4 py-3 flex flex-col gap-1.5 max-h-[500px] overflow-y-auto">
-          {entries.map((entry, i) =>
-            entry.type === "text" ? (
-              <p key={i} className={`text-xs font-mono ${
-                entry.msg.startsWith("─") ? "text-zinc-300" :
-                entry.msg.startsWith("✓") ? "text-zinc-600" :
-                "text-zinc-400"
-              }`}>
-                {entry.msg}
-              </p>
-            ) : (
-              <ThinkingBlock key={i} label={entry.label} content={entry.content} />
-            )
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
