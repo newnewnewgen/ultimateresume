@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
+import WelcomeBox from "./WelcomeBox";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -22,16 +23,22 @@ export default async function DashboardPage() {
         .single(),
     ]);
 
+  const firstName = profile?.name?.split(" ")[0];
+  const isNew = (activityCount ?? 0) === 0;
+
   return (
     <div>
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-zinc-900">
-          {profile?.name ? `Welcome, ${profile.name.split(" ")[0]}` : "Dashboard"}
+          {profile?.name ? `Welcome back, ${firstName}` : "Dashboard"}
         </h1>
         <p className="text-zinc-500 mt-1 text-sm">
           Your resume sessions and activity bank
         </p>
       </div>
+
+      {/* Welcome box — shown only for new users with empty activity bank */}
+      {isNew && <WelcomeBox firstName={firstName} />}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
         <Link href="/sessions/new" className="bg-white rounded-xl border border-zinc-200 p-5 hover:border-zinc-300 transition-colors group">
@@ -52,7 +59,7 @@ export default async function DashboardPage() {
             Manage entries →
           </p>
         </Link>
-        <Link href="/profile" className="bg-white rounded-xl border border-zinc-200 p-5 hover:border-zinc-300 transition-colors group">
+        <Link href="/activities" className="bg-white rounded-xl border border-zinc-200 p-5 hover:border-zinc-300 transition-colors group">
           <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-1">
             Profile
           </p>
@@ -77,12 +84,6 @@ export default async function DashboardPage() {
           className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
         >
           Activity bank
-        </Link>
-        <Link
-          href="/profile"
-          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
-        >
-          Profile
         </Link>
       </div>
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import ActivityModal from "./ActivityModal";
 import ProfileSection, { ProfileSectionHandle } from "./ProfileSection";
@@ -86,6 +86,67 @@ export default function ActivityBank({
   const [reviewData, setReviewData] = useState<ParsedResume | null>(null);
   // Returning: offer to update profile from a new upload
   const [parsedProfileOffer, setParsedProfileOffer] = useState<{ profile: Partial<ProfileData>; education: Omit<EduRow, "id">[] } | null>(null);
+
+  // ── Pick up data / mode stored by dashboard WelcomeBox ───────────────────
+
+  useEffect(() => {
+    // Pending parsed resume from dashboard upload or Jake demo
+    const pending = sessionStorage.getItem("pendingResumeData");
+    if (pending) {
+      sessionStorage.removeItem("pendingResumeData");
+      try {
+        const raw = JSON.parse(pending);
+        const profileData: Partial<ProfileData> = {
+          name: raw.profile?.name ?? "",
+          email: raw.profile?.email ?? "",
+          phone: raw.profile?.phone ?? "",
+          location: raw.profile?.location ?? "",
+          linkedin: raw.profile?.linkedin ?? "",
+          website: raw.profile?.website ?? "",
+          summary: raw.profile?.summary ?? "",
+          skills: raw.profile?.skills ?? [],
+          awards: raw.profile?.awards ?? [],
+          certifications: raw.profile?.certifications ?? [],
+        };
+        const educationData: Omit<EduRow, "id">[] = (raw.profile?.education ?? []).map(
+          (e: Record<string, unknown>, i: number) => ({
+            sort_order: i,
+            school: e.school ?? "",
+            degree: e.degree ?? "",
+            field_of_study: e.field_of_study ?? "",
+            location: e.location ?? "",
+            start_date: e.start_date ?? "",
+            end_date: e.end_date ?? "",
+            gpa: e.gpa ?? "",
+            description: e.description ?? "",
+            bullets: e.bullets ?? [],
+          })
+        );
+        const activitiesData: Activity[] = (raw.activities ?? []).map((a: Record<string, unknown>) => ({
+          bullet_id: (a.bullet_id as string) || `act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          entry_type: (a.entry_type as string) ?? "work",
+          job_title: (a.job_title as string) ?? "",
+          company: (a.company as string) ?? "",
+          dates_worked: (a.dates_worked as string) ?? "",
+          location: (a.location as string) ?? "",
+          situation: (a.situation as string) ?? "",
+          action: (a.action as string) ?? "",
+          impact: (a.impact as string) ?? "",
+          extracted_skills: (a.extracted_skills as string[]) ?? [],
+        }));
+        setReviewData({ profile: profileData, education: educationData, activities: activitiesData });
+        return;
+      } catch {}
+    }
+
+    // Manual setup mode from dashboard
+    const mode = sessionStorage.getItem("setupMode");
+    if (mode === "manual") {
+      sessionStorage.removeItem("setupMode");
+      setStartedManually(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = filter === "all" ? activities : activities.filter((a) => a.entry_type === filter);
 
