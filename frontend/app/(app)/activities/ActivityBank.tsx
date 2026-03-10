@@ -134,7 +134,13 @@ export default function ActivityBank({
           impact: (a.impact as string) ?? "",
           extracted_skills: (a.extracted_skills as string[]) ?? [],
         }));
-        setReviewData({ profile: profileData, education: educationData, activities: activitiesData });
+        if (isFirstTime) {
+          // First-time: show full review panel (profile + activities together)
+          setReviewData({ profile: profileData, education: educationData, activities: activitiesData });
+        } else {
+          // Returning: just offer to update profile fields (don't re-insert activities)
+          setParsedProfileOffer({ profile: profileData, education: educationData });
+        }
         return;
       } catch {}
     }

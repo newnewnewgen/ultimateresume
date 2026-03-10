@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, forwardRef, useImperativeHandle, useTransition } from "react";
+import { useState, useRef, forwardRef, useImperativeHandle, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import EducationSection from "../profile/EducationSection";
 
@@ -87,6 +87,10 @@ const ProfileSection = forwardRef<ProfileSectionHandle, Props>(function ProfileS
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [replaceUploading, setReplaceUploading] = useState(false);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
+  const [replaceWarning, setReplaceWarning] = useState<{ profile: Partial<ProfileData>; education: Omit<EduRow, "id">[] } | null>(null);
+  const replaceFileRef = useRef<HTMLInputElement>(null);
 
   const [name, setName] = useState(p.name ?? "");
   const [email, setEmail] = useState(p.email ?? "");
@@ -117,6 +121,65 @@ const ProfileSection = forwardRef<ProfileSectionHandle, Props>(function ProfileS
     },
     expand() { setExpanded(true); },
   }));
+
+  async function handleReplaceUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setReplaceUploading(true);
+    setReplaceError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/ingest/resume`,
+        { method: "POST", body: form }
+      );
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const parsed = await res.json();
+      const profileData: Partial<ProfileData> = {
+        name: parsed.profile?.name ?? "",
+        email: parsed.profile?.email ?? "",
+        phone: parsed.profile?.phone ?? "",
+        location: parsed.profile?.location ?? "",
+        linkedin: parsed.profile?.linkedin ?? "",
+        website: parsed.profile?.website ?? "",
+        summary: parsed.profile?.summary ?? "",
+        skills: parsed.profile?.skills ?? [],
+        awards: parsed.profile?.awards ?? [],
+        certifications: parsed.profile?.certifications ?? [],
+      };
+      const educationData: Omit<EduRow, "id">[] = (parsed.profile?.education ?? []).map(
+        (ed: Record<string, unknown>, i: number) => ({
+          sort_order: i, school: ed.school ?? "", degree: ed.degree ?? "",
+          field_of_study: ed.field_of_study ?? "", location: ed.location ?? "",
+          start_date: ed.start_date ?? "", end_date: ed.end_date ?? "",
+          gpa: ed.gpa ?? "", description: ed.description ?? "", bullets: ed.bullets ?? [],
+        })
+      );
+      setReplaceWarning({ profile: profileData, education: educationData });
+    } catch (err) {
+      setReplaceError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setReplaceUploading(false);
+      if (replaceFileRef.current) replaceFileRef.current.value = "";
+    }
+  }
+
+  function confirmReplace() {
+    if (!replaceWarning) return;
+    setName(replaceWarning.profile.name ?? "");
+    setEmail(replaceWarning.profile.email ?? "");
+    setPhone(replaceWarning.profile.phone ?? "");
+    setLocation(replaceWarning.profile.location ?? "");
+    setLinkedin(replaceWarning.profile.linkedin ?? "");
+    setWebsite(replaceWarning.profile.website ?? "");
+    setSummary(replaceWarning.profile.summary ?? "");
+    setSkills(replaceWarning.profile.skills ?? []);
+    setAwards(replaceWarning.profile.awards ?? []);
+    setCertifications(replaceWarning.profile.certifications ?? []);
+    setEducationRows(replaceWarning.education.map((ed, i) => ({ ...ed, sort_order: i })));
+    setReplaceWarning(null);
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -173,6 +236,33 @@ const ProfileSection = forwardRef<ProfileSectionHandle, Props>(function ProfileS
       {/* Expanded form */}
       {expanded && (
         <form onSubmit={handleSubmit} className="border-t border-zinc-100 px-4 py-5 flex flex-col gap-6">
+
+          {/* Replace from resume */}
+          {replaceWarning ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col gap-2">
+              <p className="text-sm font-medium text-amber-900">Replace all profile fields?</p>
+              <p className="text-xs text-amber-700">
+                This will overwrite your name, contact info, summary, skills, and education with data from the uploaded resume. Your activities won&apos;t be affected. You can still edit before saving.
+              </p>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={confirmReplace} className="rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-900 transition-colors">
+                  Yes, replace fields
+                </button>
+                <button type="button" onClick={() => setReplaceWarning(null)} className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <label className={`rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 transition-colors cursor-pointer ${replaceUploading ? "opacity-50 pointer-events-none" : ""}`}>
+                {replaceUploading ? "Parsing…" : "Replace from resume"}
+                <input ref={replaceFileRef} type="file" accept=".pdf,.docx" className="hidden" onChange={handleReplaceUpload} />
+              </label>
+              {replaceError && <span className="text-xs text-red-600">{replaceError}</span>}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-zinc-700 mb-1.5">Full name</label>
