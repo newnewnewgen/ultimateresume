@@ -5,6 +5,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import { useEffect } from "react";
+import { DEFAULT_DESIGN, designToStyles, ptToPx, type ResumeDesign } from "@/lib/design";
 
 // ── Plain-text → HTML ─────────────────────────────────────────────────────────
 
@@ -35,6 +36,12 @@ export function resumeTextToHtml(text: string): string {
     // Section header: ALL CAPS, no special chars
     if (t === t.toUpperCase() && t.length > 2 && !/[|@\d]/.test(t)) {
       html += `<h2>${t}</h2>`;
+      continue;
+    }
+
+    // Role line: contains | (job title | company | dates)
+    if (t.includes("|")) {
+      html += `<h3>${t}</h3>`;
       continue;
     }
 
@@ -103,9 +110,15 @@ interface Props {
   content: string;
   onChange?: (text: string) => void;
   readOnly?: boolean;
+  design?: ResumeDesign;
 }
 
-export default function ResumeEditor({ content, onChange, readOnly = false }: Props) {
+export default function ResumeEditor({ content, onChange, readOnly = false, design }: Props) {
+  const d = design ? designToStyles(design) : designToStyles(DEFAULT_DESIGN);
+  const accentColor = design?.accentColor ?? DEFAULT_DESIGN.accentColor;
+  const showDividers = design?.showDividers ?? DEFAULT_DESIGN.showDividers;
+  const marginX = design?.marginX ?? DEFAULT_DESIGN.marginX;
+  const marginY = design?.marginY ?? DEFAULT_DESIGN.marginY;
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -116,7 +129,7 @@ export default function ResumeEditor({ content, onChange, readOnly = false }: Pr
     editable: !readOnly,
     editorProps: {
       attributes: {
-        class: "resume-editor-content focus:outline-none min-h-[600px]",
+        class: "resume-editor-content focus:outline-none",
       },
     },
     onUpdate({ editor }) {
@@ -137,9 +150,10 @@ export default function ResumeEditor({ content, onChange, readOnly = false }: Pr
   if (!editor) return null;
 
   return (
-    <div className="border border-zinc-200 rounded-xl overflow-hidden bg-white">
+    <div className="flex flex-col gap-0">
+      {/* Toolbar */}
       {!readOnly && (
-        <div className="flex items-center gap-1 px-3 py-2 border-b border-zinc-100 bg-zinc-50 flex-wrap">
+        <div className="flex items-center gap-1 px-3 py-2 border border-zinc-200 rounded-t-xl bg-zinc-50 flex-wrap">
           <ToolbarBtn title="Bold" active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}>
             <strong>B</strong>
           </ToolbarBtn>
@@ -152,10 +166,10 @@ export default function ResumeEditor({ content, onChange, readOnly = false }: Pr
 
           <span className="w-px h-4 bg-zinc-200 mx-1" />
 
-          <ToolbarBtn title="Section header" active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
+          <ToolbarBtn title="Section header (ALL CAPS)" active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
             H2
           </ToolbarBtn>
-          <ToolbarBtn title="Subheading" active={editor.isActive("heading", { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>
+          <ToolbarBtn title="Role / subheading" active={editor.isActive("heading", { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>
             H3
           </ToolbarBtn>
 
@@ -172,8 +186,62 @@ export default function ResumeEditor({ content, onChange, readOnly = false }: Pr
         </div>
       )}
 
-      <div className="px-8 py-8 max-w-[680px] mx-auto">
-        <EditorContent editor={editor} />
+      {/* Paper-like resume page */}
+      <div className={`bg-zinc-100 border border-zinc-200 ${readOnly ? "rounded-xl" : "rounded-b-xl border-t-0"} flex justify-center py-8 px-4 min-h-[600px]`}>
+        <div
+          className="w-full max-w-[720px] bg-white shadow-[0_2px_20px_rgba(0,0,0,0.09)]"
+          style={{
+            paddingTop:    `${marginY * 96}px`,
+            paddingBottom: `${marginY * 96}px`,
+            paddingLeft:   `${marginX * 96}px`,
+            paddingRight:  `${marginX * 96}px`,
+          }}
+        >
+          <style>{`
+            .resume-editor-content h2 {
+              font-family: ${d.sectionHeader.fontFamily};
+              font-size: ${d.sectionHeader.fontSize};
+              font-weight: ${d.sectionHeader.fontWeight};
+              color: ${d.sectionHeader.color};
+              text-transform: ${d.sectionHeader.textTransform};
+              letter-spacing: ${d.sectionHeader.letterSpacing};
+              line-height: ${d.sectionHeader.lineHeight};
+              border-bottom: ${showDividers ? `1px solid ${accentColor}` : "none"};
+              padding-bottom: 2px;
+              margin-top: 18px;
+              margin-bottom: 5px;
+            }
+            .resume-editor-content h3 {
+              font-family: ${d.roleHeader.fontFamily};
+              font-size: ${d.roleHeader.fontSize};
+              font-weight: ${d.roleHeader.fontWeight};
+              color: ${d.roleHeader.color};
+              line-height: ${d.roleHeader.lineHeight};
+              margin: 8px 0 1px 0;
+            }
+            .resume-editor-content p {
+              font-family: ${d.body.fontFamily};
+              font-size: ${d.body.fontSize};
+              font-weight: ${d.body.fontWeight};
+              color: ${d.body.color};
+              line-height: ${d.body.lineHeight};
+              margin: 2px 0;
+            }
+            .resume-editor-content ul {
+              padding-left: ${ptToPx(14)}px;
+              margin: 2px 0 5px 0;
+            }
+            .resume-editor-content li {
+              font-family: ${d.bullet.fontFamily};
+              font-size: ${d.bullet.fontSize};
+              font-weight: ${d.bullet.fontWeight};
+              color: ${d.bullet.color};
+              line-height: ${d.bullet.lineHeight};
+              margin: 1px 0;
+            }
+          `}</style>
+          <EditorContent editor={editor} />
+        </div>
       </div>
     </div>
   );

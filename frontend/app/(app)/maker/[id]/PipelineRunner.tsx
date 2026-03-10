@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import MatchReview from "./MatchReview";
 import RubricEditor from "./RubricEditor";
@@ -13,6 +13,10 @@ import type {
   Statement,
   VectorMatch,
 } from "@/lib/api/types";
+
+type LogEntry =
+  | { type: "text"; msg: string }
+  | { type: "thinking"; label: string; content: string };
 
 type Stage =
   | "idle"
@@ -38,7 +42,21 @@ interface Props {
     linkedin: string;
     website: string;
     section_order: string[];
+    skills: string[];
+    awards: string[];
+    certifications: string[];
   } | null;
+  education: Array<{
+    school: string;
+    degree: string;
+    field_of_study: string;
+    location: string;
+    start_date: string;
+    end_date: string;
+    gpa: string;
+    description: string;
+    bullets: string[];
+  }>;
 }
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -70,7 +88,7 @@ const PIPELINE_STAGES: { label: string; stages: Stage[] }[] = [
   { label: "Done",          stages: ["done"] },
 ];
 
-export default function PipelineRunner({ sessionId, session, activities, profile }: Props) {
+export default function PipelineRunner({ sessionId, session, activities, profile, education }: Props) {
   const supabase = createClient();
 
   const [stage, setStage] = useState<Stage>(() => {
@@ -80,11 +98,14 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     return "idle";
   });
 
-  const [log,        setLog]        = useState<string[]>([]);
+  const [log,        setLog]        = useState<LogEntry[]>([]);
   const [error,      setError]      = useState<string | null>(null);
-  const [resumeTab,  setResumeTab]  = useState<"final" | "ats">("final");
-  const [copyLabel,  setCopyLabel]  = useState("Copy");
-  const [exporting,  setExporting]  = useState(false);
+  const [resumeTab,       setResumeTab]       = useState<"final" | "ats">("final");
+  const [copyLabel,       setCopyLabel]       = useState("Copy");
+  const [exporting,       setExporting]       = useState(false);
+  const [polishOpen,      setPolishOpen]      = useState(false);
+  const [polishText,      setPolishText]      = useState("");
+  const [polishing,       setPolishing]       = useState(false);
 
   const [atsRubric,            setAtsRubric]            = useState<ATSRubricItem[]>(session.ats_rubric ?? []);
   const [intentRubric,         setIntentRubric]         = useState<IntentRubric | null>(session.intent_rubric ?? null);
@@ -97,7 +118,12 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   const [finalResume,          setFinalResume]          = useState<string>(session.final_resume ?? "");
 
   function addLog(msg: string) {
-    setLog((prev) => [...prev, msg]);
+    setLog((prev) => [...prev, { type: "text", msg }]);
+  }
+
+  function addThinking(label: string, content: string) {
+    if (!content.trim()) return;
+    setLog((prev) => [...prev, { type: "thinking", label, content }]);
   }
 
   async function save(updates: Record<string, unknown>) {
@@ -133,7 +159,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       return;
     }
     setError(null);
-    setLog([]);
+    setLog((prev) => prev.length > 0 ? [...prev, { type: "text", msg: "─── New run ───" }] : []);
     setStage("analyzing");
 
     try {
@@ -249,7 +275,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         ...customActivities,
       ];
 
-      const step5Result = await apiFetch<{ statements: Statement[] }>(
+      const step5Result = await apiFetch<{ statements: Statement[]; thinking?: string }>(
         "/api/pipeline/step5",
         {
           ats_rubric:      atsRubric,
@@ -261,6 +287,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
       const ok = step5Result.statements.filter((s) => s.statement && !s.error).length;
       addLog(`✓ Generated ${ok} bullets — review and edit below`);
+      addThinking("Bullet generation", step5Result.thinking ?? "");
       setStatements(step5Result.statements);
       await save({ statements: step5Result.statements, current_step: 5 });
 
@@ -280,34 +307,44 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     addLog("Assembling ATS resume…");
 
     try {
+      const allActivities = vectorizedActivities.length > 0 ? vectorizedActivities : activities;
+      const consolidatedSkills = [...new Set(allActivities.flatMap((a) => a.extracted_skills ?? []))];
+
       const template = {
-        name:     profile?.name     ?? "",
-        email:    profile?.email    ?? "",
-        phone:    profile?.phone    ?? "",
-        location: profile?.location ?? "",
-        linkedin: profile?.linkedin ?? "",
-        website:  profile?.website  ?? "",
-        sections: profile?.section_order ?? ["summary", "experience", "education", "skills"],
+        name:           profile?.name           ?? "",
+        email:          profile?.email          ?? "",
+        phone:          profile?.phone          ?? "",
+        location:       profile?.location       ?? "",
+        linkedin:       profile?.linkedin       ?? "",
+        website:        profile?.website        ?? "",
+        sections:       profile?.section_order  ?? ["summary", "experience", "education", "skills"],
+        skills:         profile?.skills         ?? [],
+        awards:         profile?.awards         ?? [],
+        certifications: profile?.certifications ?? [],
+        education:      education,
       };
 
-      const step6Result = await apiFetch<{ ats_resume: string }>("/api/pipeline/step6", {
+      const step6Result = await apiFetch<{ ats_resume: string; thinking?: string }>("/api/pipeline/step6", {
         template,
         statements:          confirmedStatements,
         role_context:        session.title ?? "",
         holistic_person:     intentRubric?.holistic_summary ?? "",
-        consolidated_skills: [],
+        consolidated_skills: consolidatedSkills,
       });
 
       setAtsResume(step6Result.ats_resume);
+      addLog("✓ Resume assembled");
+      addThinking("Resume assembly", step6Result.thinking ?? "");
       addLog("Applying intent rewrite…");
 
-      const step7Result = await apiFetch<{ final_resume: string }>("/api/pipeline/step7", {
+      const step7Result = await apiFetch<{ final_resume: string; thinking?: string }>("/api/pipeline/step7", {
         ats_resume:    step6Result.ats_resume,
         intent_rubric: intentRubric,
         ats_keywords:  atsRubric.flatMap((r) => r.ats_keywords),
       });
 
       setFinalResume(step7Result.final_resume);
+      addThinking("Intent alignment", step7Result.thinking ?? "");
       addLog("✓ Done!");
 
       await save({
@@ -329,19 +366,42 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     const win = window.open("", "_blank");
     if (!win) return;
     win.document.write(`
-      <!DOCTYPE html><html><head><title>${name}</title>
-      <style>
-        body{font-family:Georgia,"Times New Roman",serif;font-size:10.5pt;
-             line-height:1.55;color:#000;max-width:700px;margin:60px auto;padding:0 40px;}
-        h2{font-family:Arial,sans-serif;font-size:11pt;font-weight:700;
-           text-transform:uppercase;letter-spacing:.06em;
-           border-bottom:1px solid #aaa;padding-bottom:3px;margin-top:1.2rem;}
-        ul{padding-left:1.2rem;margin:.2rem 0;}
-        li{margin:.1rem 0;}
-        p{margin:.15rem 0;}
-        @media print{@page{margin:.75in}body{margin:0;padding:0}}
-      </style></head>
-      <body class="resume-print-area">${_textToHtmlForPrint(text)}</body></html>
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <title>${name}</title>
+        <style>
+          *{box-sizing:border-box;margin:0;padding:0}
+          body{
+            font-family:Georgia,"Times New Roman",serif;
+            font-size:10.5pt;
+            line-height:1.55;
+            color:#000;
+            max-width:720px;
+            margin:0 auto;
+            padding:54pt 54pt;
+          }
+          h1{font-size:20pt;font-weight:700;margin-bottom:4pt}
+          h2{
+            font-family:Arial,Helvetica,sans-serif;
+            font-size:9pt;font-weight:700;
+            text-transform:uppercase;letter-spacing:.08em;
+            border-bottom:0.75pt solid #999;padding-bottom:2pt;
+            margin-top:14pt;margin-bottom:5pt;
+          }
+          h3{font-size:10.5pt;font-weight:600;margin-top:7pt;margin-bottom:1pt}
+          ul{padding-left:14pt;margin:2pt 0 5pt}
+          li{margin:1pt 0;line-height:1.5}
+          p{margin:1pt 0}
+          @media print{
+            @page{margin:.65in}
+            body{padding:0;margin:0}
+          }
+        </style>
+      </head>
+      <body>${_textToHtmlForPrint(text)}</body>
+      </html>
     `);
     win.document.close();
     win.print();
@@ -361,6 +421,8 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       if (inList) { html += "</ul>"; inList = false; }
       if (t === t.toUpperCase() && t.length > 2 && !/[|@\d]/.test(t))
         html += `<h2>${t}</h2>`;
+      else if (t.includes("|"))
+        html += `<h3>${t}</h3>`;
       else
         html += `<p>${t}</p>`;
     }
@@ -397,6 +459,31 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     setTimeout(() => setCopyLabel("Copy"), 2000);
   }
 
+  async function handlePolish() {
+    if (!polishText.trim()) return;
+    setPolishing(true);
+    setError(null);
+    try {
+      const result = await fetch(`${API}/api/design/polish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume_text: activeResume, instruction: polishText.trim() }),
+      });
+      if (!result.ok) throw new Error(`Polish failed (${result.status})`);
+      const data: { polished_text: string; thinking?: string } = await result.json();
+      if (resumeTab === "final") { setFinalResume(data.polished_text); save({ final_resume: data.polished_text }); }
+      else                       { setAtsResume(data.polished_text);   save({ ats_resume: data.polished_text });   }
+      addLog(`✓ Polished: "${polishText.trim()}"`);
+      addThinking(`Polish: ${polishText.trim()}`, data.thinking ?? "");
+      setPolishText("");
+      setPolishOpen(false);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Polish failed");
+    } finally {
+      setPolishing(false);
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const currentStepIdx = PIPELINE_STAGES.findIndex((s) => s.stages.includes(stage));
@@ -424,6 +511,11 @@ export default function PipelineRunner({ sessionId, session, activities, profile
             </div>
           ))}
         </div>
+      )}
+
+      {/* Persistent activity log — always visible once there are entries */}
+      {log.length > 0 && (
+        <ActivityLog entries={log} />
       )}
 
       {/* ── IDLE ── */}
@@ -464,7 +556,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
             <Spinner />
             <span className="text-sm font-medium text-zinc-700">Analyzing job description…</span>
           </div>
-          <LogLines lines={log} />
+          <LogLines entries={log} />
         </div>
       )}
 
@@ -473,7 +565,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         <div className="flex flex-col gap-4">
           {log.length > 0 && (
             <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
-              <LogLines lines={log} />
+              <LogLines entries={log} />
             </div>
           )}
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
@@ -488,7 +580,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
             <Spinner />
             <span className="text-sm font-medium text-zinc-700">Matching activities to requirements…</span>
           </div>
-          <LogLines lines={log} />
+          <LogLines entries={log} />
         </div>
       )}
 
@@ -497,7 +589,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         <div className="flex flex-col gap-4">
           {log.length > 0 && (
             <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
-              <LogLines lines={log} />
+              <LogLines entries={log} />
             </div>
           )}
 
@@ -533,7 +625,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
             <Spinner />
             <span className="text-sm font-medium text-zinc-700">Generating bullets in parallel…</span>
           </div>
-          <LogLines lines={log} />
+          <LogLines entries={log} />
         </div>
       )}
 
@@ -542,7 +634,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         <div className="flex flex-col gap-4">
           {log.length > 0 && (
             <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
-              <LogLines lines={log} />
+              <LogLines entries={log} />
             </div>
           )}
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
@@ -557,13 +649,14 @@ export default function PipelineRunner({ sessionId, session, activities, profile
             <Spinner />
             <span className="text-sm font-medium text-zinc-700">Assembling resume…</span>
           </div>
-          <LogLines lines={log} />
+          <LogLines entries={log} />
         </div>
       )}
 
       {/* ── DONE ── */}
       {stage === "done" && (
         <div className="flex flex-col gap-4">
+          {/* Tab row + export buttons */}
           <div className="flex items-center gap-2 flex-wrap" data-no-print>
             <button onClick={() => setResumeTab("final")}
               className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${resumeTab === "final" ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"}`}>
@@ -574,6 +667,12 @@ export default function PipelineRunner({ sessionId, session, activities, profile
               ATS version
             </button>
             <span className="flex-1" />
+            <button
+              onClick={() => setPolishOpen((v) => !v)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border ${polishOpen ? "bg-zinc-900 text-white border-zinc-900" : "border-zinc-300 text-zinc-700 hover:bg-zinc-50"}`}>
+              ✦ Polish with AI
+            </button>
+            <span className="w-px h-4 bg-zinc-200" />
             <button onClick={() => handleCopy(activeResume)}
               className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors">
               {copyLabel}
@@ -587,6 +686,46 @@ export default function PipelineRunner({ sessionId, session, activities, profile
               {exporting ? "Exporting…" : "Download DOCX"}
             </button>
           </div>
+
+          {/* AI Polish panel */}
+          {polishOpen && (
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 flex flex-col gap-2" data-no-print>
+              <p className="text-xs font-medium text-zinc-700">
+                Tell the AI what to change — it will rewrite the resume and return the full updated version.
+              </p>
+              <div className="flex flex-col gap-1">
+                <div className="flex flex-wrap gap-1 mb-1">
+                  {["Fix repetitive action verbs", "Tighten bullets to one line each", "Strengthen the summary", "Add more quantified results"].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setPolishText(s)}
+                      className="rounded-md border border-zinc-300 bg-white px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-100 transition-colors"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={polishText}
+                    onChange={(e) => setPolishText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handlePolish(); }}
+                    placeholder="e.g. Fix repetitive action verbs, tighten every bullet to one line"
+                    className="flex-1 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                  />
+                  <button
+                    onClick={handlePolish}
+                    disabled={polishing || !polishText.trim()}
+                    className="rounded-lg bg-zinc-900 text-white px-4 py-1.5 text-sm font-medium disabled:opacity-50 hover:bg-zinc-700 transition-colors"
+                  >
+                    {polishing ? "Polishing…" : "Apply"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
@@ -619,12 +758,86 @@ function Spinner() {
   );
 }
 
-function LogLines({ lines }: { lines: string[] }) {
+/** Inline per-stage log — shows only plain text entries, no thinking blocks */
+function LogLines({ entries }: { entries: LogEntry[] }) {
+  const textEntries = entries.filter((e): e is { type: "text"; msg: string } => e.type === "text");
   return (
     <div className="flex flex-col gap-0.5">
-      {lines.map((msg, i) => (
-        <p key={i} className="text-xs text-zinc-500 font-mono">{msg}</p>
+      {textEntries.map((e, i) => (
+        <p key={i} className="text-xs text-zinc-500 font-mono">{e.msg}</p>
       ))}
+    </div>
+  );
+}
+
+/** Expandable thinking block */
+function ThinkingBlock({ label, content }: { label: string; content: string }) {
+  const [open, setOpen] = useState(false);
+  const wordCount = content.trim().split(/\s+/).length;
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-100 transition-colors"
+      >
+        <span className="text-zinc-400 text-xs font-mono shrink-0">{open ? "▾" : "▸"}</span>
+        <span className="text-xs font-medium text-zinc-500 truncate flex-1">
+          Thinking: {label}
+        </span>
+        <span className="text-xs text-zinc-400 shrink-0 font-mono">{wordCount} words</span>
+      </button>
+      {open && (
+        <div className="border-t border-zinc-200 px-3 py-3 max-h-[400px] overflow-y-auto">
+          <pre className="text-xs text-zinc-500 font-mono whitespace-pre-wrap leading-relaxed">
+            {content.trim()}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Persistent activity log — always visible, shows all entries including thinking */
+function ActivityLog({ entries }: { entries: LogEntry[] }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const hasThinking = entries.some((e) => e.type === "thinking");
+
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden" data-no-print>
+      <button
+        type="button"
+        onClick={() => setCollapsed((v) => !v)}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-zinc-50 transition-colors border-b border-zinc-100"
+      >
+        <span className="text-zinc-400 text-xs font-mono">{collapsed ? "▸" : "▾"}</span>
+        <span className="text-xs font-semibold text-zinc-600 tracking-wide uppercase">
+          Activity log
+        </span>
+        {hasThinking && (
+          <span className="ml-1 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500">
+            includes AI thinking
+          </span>
+        )}
+      </button>
+
+      {!collapsed && (
+        <div className="px-4 py-3 flex flex-col gap-1.5 max-h-[500px] overflow-y-auto">
+          {entries.map((entry, i) =>
+            entry.type === "text" ? (
+              <p key={i} className={`text-xs font-mono ${
+                entry.msg.startsWith("─") ? "text-zinc-300" :
+                entry.msg.startsWith("✓") ? "text-zinc-600" :
+                "text-zinc-400"
+              }`}>
+                {entry.msg}
+              </p>
+            ) : (
+              <ThinkingBlock key={i} label={entry.label} content={entry.content} />
+            )
+          )}
+        </div>
+      )}
     </div>
   );
 }

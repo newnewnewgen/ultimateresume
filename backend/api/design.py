@@ -6,14 +6,17 @@ import re
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.ai_engine import (
     assemble_latex_resume,
     edit_latex_with_ai,
+    extract_design_from_docx,
+    extract_design_from_pdf,
     generate_latex_template,
+    polish_resume,
 )
 
 router = APIRouter()
@@ -198,5 +201,51 @@ async def export_docx(req: ExportDocxRequest):
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+# ── AI Polish ─────────────────────────────────────────────────────────────────
+
+class PolishRequest(BaseModel):
+    resume_text: str
+    instruction: str
+
+
+class PolishResponse(BaseModel):
+    polished_text: str
+    thinking: str = ""
+
+
+@router.post("/polish", response_model=PolishResponse)
+async def polish(req: PolishRequest):
+    """Apply a user instruction to polish the resume using AI."""
+    try:
+        polished, thinking = polish_resume(req.resume_text, req.instruction)
+        return PolishResponse(polished_text=polished, thinking=thinking)
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+# ── AI Design Parser ───────────────────────────────────────────────────────────
+
+@router.post("/parse-design")
+async def parse_design(file: UploadFile = File(...)):
+    """Parse a DOCX or PDF resume and extract design settings as a ResumeDesign JSON object."""
+    try:
+        content_type = (file.content_type or "").lower()
+        filename = (file.filename or "").lower()
+        file_bytes = await file.read()
+
+        if "wordprocessingml" in content_type or filename.endswith(".docx"):
+            design = extract_design_from_docx(file_bytes)
+        elif "pdf" in content_type or filename.endswith(".pdf"):
+            design = extract_design_from_pdf(file_bytes)
+        else:
+            raise HTTPException(400, "Unsupported file type. Please upload a .docx or .pdf file.")
+
+        return design
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc

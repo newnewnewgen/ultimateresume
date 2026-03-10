@@ -96,6 +96,10 @@ class ResumeTemplate:
     summary_section: bool = True
     sections: list[str] = field(default_factory=lambda: ["experience", "skills", "projects", "education"])
     raw_text: str = ""
+    skills: list[str] = field(default_factory=list)
+    awards: list[str] = field(default_factory=list)
+    certifications: list[str] = field(default_factory=list)
+    education: list[dict] = field(default_factory=list)
 
 
 @dataclass

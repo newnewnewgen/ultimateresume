@@ -29,9 +29,11 @@ from prompts.templates import (
     GENERATE_LATEX_TEMPLATE,
     INTENT_REWRITE,
     PARSE_PDF_RESUME_TEMPLATE,
+    PARSE_RESUME_DESIGN,
     PARSE_RESUME_FULL,
     PARSE_RESUME_TO_ACTIVITY_BANK,
     PARSE_RAW_TEXT_ACTIVITY,
+    POLISH_RESUME,
     WRITE_STI_STATEMENT,
 )
 
@@ -125,6 +127,82 @@ def _call_gemini(
                 # else: fall through to next model or raise
             except Exception:
                 raise  # non-503 errors propagate immediately
+
+    raise last_error  # type: ignore[misc]
+
+
+def _extract_thinking(response) -> str:
+    """Extract thinking tokens from a Gemini response object."""
+    thinking_parts: list[str] = []
+    try:
+        for part in response.candidates[0].content.parts:
+            if getattr(part, "thought", False) and part.text:
+                thinking_parts.append(part.text)
+    except Exception:
+        pass
+    return "\n\n".join(thinking_parts)
+
+
+def _call_gemini_with_thinking(
+    prompt: str,
+    max_output_tokens: int = 8192,
+    use_pro: bool = False,
+    thinking_budget: int | None = None,
+) -> tuple[str, str]:
+    """Like _call_gemini but also returns extracted thinking text as a second value.
+
+    Returns:
+        (response_text, thinking_text) — thinking_text is "" when no thinking occurred.
+    """
+    if use_pro:
+        model_name = GEMINI_PRO
+    else:
+        model_name = GEMINI_FLASH
+
+    client = _get_client()
+    thinking_config = (
+        genai_types.ThinkingConfig(thinking_budget=thinking_budget)
+        if thinking_budget is not None
+        else None
+    )
+
+    max_retries = 3
+    last_error: Exception | None = None
+    models_to_try = [model_name]
+    if use_pro and model_name == GEMINI_PRO:
+        models_to_try.append(GEMINI_FLASH)
+
+    for current_model in models_to_try:
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=current_model,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        max_output_tokens=max_output_tokens,
+                        temperature=0.3,
+                        thinking_config=thinking_config,
+                    ),
+                )
+                text = response.text
+                if not text or not text.strip():
+                    finish_reason = None
+                    try:
+                        finish_reason = response.candidates[0].finish_reason
+                    except Exception:
+                        pass
+                    raise ValueError(
+                        f"Gemini returned an empty response. finish_reason={finish_reason}."
+                    )
+                thinking = _extract_thinking(response)
+                return text, thinking
+            except genai_errors.ServerError as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait = 10 * (2 ** attempt)
+                    time.sleep(wait)
+            except Exception:
+                raise
 
     raise last_error  # type: ignore[misc]
 
@@ -267,7 +345,8 @@ def write_sti_statement(
         company=activity.company,
         extracted_skills=", ".join(activity.extracted_skills) if activity.extracted_skills else "Not available",
     )
-    return _call_gemini(prompt, max_output_tokens=8192, use_pro=False, thinking_budget=1024).strip()
+    text, thinking = _call_gemini_with_thinking(prompt, max_output_tokens=8192, use_pro=False, thinking_budget=1024)
+    return text.strip(), thinking
 
 
 def dedup_bullets(statements: list[dict]) -> list[dict]:
@@ -324,9 +403,32 @@ def assemble_resume(
         for bullet in role_bullets[(job_title, company, dates, location)]:
             work_history_block += f"  • {bullet}\n"
 
-    skills_list = "  Not available"
-    if consolidated_skills:
-        skills_list = ", ".join(consolidated_skills)
+    # Skills: prefer consolidated from activities, fall back to profile skills
+    effective_skills = consolidated_skills or template.skills or []
+    skills_list = ", ".join(effective_skills) if effective_skills else "  Not available"
+
+    # Build education block
+    education_block = "  Not provided"
+    if template.education:
+        lines = []
+        for edu in template.education:
+            degree_line = " ".join(filter(None, [edu.get("degree", ""), edu.get("field_of_study", "")]))
+            date_line = " – ".join(filter(None, [edu.get("start_date", ""), edu.get("end_date", "")]))
+            school_line = " | ".join(filter(None, [edu.get("school", ""), edu.get("location", ""), date_line]))
+            gpa = edu.get("gpa", "")
+            lines.append(school_line)
+            if degree_line:
+                lines.append(f"  {degree_line}" + (f" | GPA: {gpa}" if gpa else ""))
+            if edu.get("description"):
+                lines.append(f"  {edu['description']}")
+            for b in edu.get("bullets", []):
+                if b:
+                    lines.append(f"  • {b}")
+            lines.append("")
+        education_block = "\n".join(lines).strip()
+
+    awards_list = "\n".join(f"  • {a}" for a in template.awards) if template.awards else "  None"
+    certifications_list = "\n".join(f"  • {c}" for c in template.certifications) if template.certifications else "  None"
 
     prompt = ASSEMBLE_RESUME.format(
         name=template.name,
@@ -340,8 +442,12 @@ def assemble_resume(
         role_context=role_context or "Not provided",
         holistic_person=holistic_person or "Not provided",
         skills_list=skills_list,
+        education_block=education_block,
+        awards_list=awards_list,
+        certifications_list=certifications_list,
     )
-    return _call_gemini(prompt, max_output_tokens=16384, use_pro=True, thinking_budget=4096).strip()
+    text, thinking = _call_gemini_with_thinking(prompt, max_output_tokens=16384, use_pro=True, thinking_budget=4096)
+    return text.strip(), thinking
 
 
 def intent_rewrite(
@@ -366,7 +472,18 @@ def intent_rewrite(
         holistic_summary=intent_rubric.holistic_summary,
         ats_keyword_checklist=keyword_checklist,
     )
-    return _call_gemini(prompt, max_output_tokens=8192, use_pro=True, thinking_budget=2048).strip()
+    text, thinking = _call_gemini_with_thinking(prompt, max_output_tokens=8192, use_pro=True, thinking_budget=2048)
+    return text.strip(), thinking
+
+
+def polish_resume(resume_text: str, instruction: str) -> str:
+    """Apply a user instruction to polish the resume using AI."""
+    prompt = POLISH_RESUME.format(
+        resume_text=resume_text,
+        instruction=instruction,
+    )
+    text, thinking = _call_gemini_with_thinking(prompt, max_output_tokens=8192, use_pro=True, thinking_budget=1024)
+    return text.strip(), thinking
 
 
 def extract_skills_from_activities(activities: list) -> dict[str, list[str]]:
@@ -472,3 +589,211 @@ def assemble_latex_resume(latex_template: str, resume_text: str, profile: dict) 
         website=profile.get("website", ""),
     )
     return _call_gemini(prompt, max_output_tokens=8192, use_pro=True, thinking_budget=2048).strip()
+
+
+# ── Design extraction ─────────────────────────────────────────────────────────
+
+_DEFAULT_ELEMENT = {
+    "fontFamily":    "Georgia, 'Times New Roman', serif",
+    "fontSize":      10.5,
+    "fontWeight":    "400",
+    "color":         "#222222",
+    "textTransform": "none",
+    "letterSpacing": "0em",
+    "lineHeight":    1.55,
+    "textAlign":     "left",
+    "borderBottom":  "none",
+}
+
+_DEFAULT_DESIGN: dict = {
+    "pages":        1,
+    "pageSize":     "letter",
+    "marginX":      1.0,
+    "marginY":      0.75,
+    "accentColor":  "#bbbbbb",
+    "showDividers": True,
+    "elements": {
+        "nameContact":     {**_DEFAULT_ELEMENT, "fontSize": 16, "fontWeight": "700", "color": "#111111", "textAlign": "center", "lineHeight": 1.3},
+        "sectionHeader":   {**_DEFAULT_ELEMENT, "fontFamily": "Arial, Helvetica, sans-serif", "fontSize": 9, "fontWeight": "700", "color": "#111111", "textTransform": "uppercase", "letterSpacing": "0.1em", "lineHeight": 1.4, "borderBottom": "1px solid #bbbbbb"},
+        "roleHeader":      {**_DEFAULT_ELEMENT, "fontWeight": "600", "color": "#111111"},
+        "educationHeader": {**_DEFAULT_ELEMENT, "fontWeight": "600", "color": "#111111"},
+        "projectHeader":   {**_DEFAULT_ELEMENT, "fontWeight": "600", "color": "#111111"},
+        "volunteerHeader": {**_DEFAULT_ELEMENT, "fontWeight": "600", "color": "#111111"},
+        "skillsBlock":     {**_DEFAULT_ELEMENT},
+        "body":            {**_DEFAULT_ELEMENT},
+        "bullet":          {**_DEFAULT_ELEMENT},
+    },
+}
+
+
+def extract_design_from_docx(file_bytes: bytes) -> dict:
+    """Extract resume design settings from a DOCX file using python-docx.
+
+    Reads paragraph styles, font properties, and page margins to build a
+    ResumeDesign-compatible dict. Falls back to defaults where data is missing.
+    """
+    import io
+    from docx import Document
+    from docx.shared import Pt, Inches
+
+    doc = Document(io.BytesIO(file_bytes))
+    design = json.loads(json.dumps(_DEFAULT_DESIGN))  # deep copy
+
+    # ── Page margins ──────────────────────────────────────────────────────────
+    try:
+        section = doc.sections[0]
+        left_in  = section.left_margin.inches  if section.left_margin  else 1.0
+        right_in = section.right_margin.inches if section.right_margin else 1.0
+        top_in   = section.top_margin.inches   if section.top_margin   else 0.75
+        design["marginX"] = round((left_in + right_in) / 2, 2)
+        design["marginY"] = round(top_in, 2)
+    except Exception:
+        pass
+
+    # ── Walk styles for named heading styles ──────────────────────────────────
+    def _font_family(font) -> str | None:
+        name = getattr(font, "name", None)
+        if not name:
+            return None
+        name_lc = name.lower()
+        if any(s in name_lc for s in ("georgia", "times", "garamond", "palatino", "cambria")):
+            return f"{name}, serif"
+        if any(s in name_lc for s in ("arial", "helvetica", "calibri", "trebuchet", "verdana", "tahoma")):
+            return f"{name}, sans-serif"
+        if any(s in name_lc for s in ("courier", "consolas", "mono")):
+            return f"{name}, monospace"
+        return f"{name}, serif"
+
+    def _font_size_pt(font) -> float | None:
+        sz = getattr(font, "size", None)
+        if sz is None:
+            return None
+        try:
+            return round(sz.pt, 1)
+        except Exception:
+            return None
+
+    def _font_weight(font) -> str | None:
+        bold = getattr(font, "bold", None)
+        if bold is True:
+            return "700"
+        if bold is False:
+            return "400"
+        return None
+
+    def _color_hex(font) -> str | None:
+        try:
+            rgb = font.color.rgb
+            return f"#{rgb}"
+        except Exception:
+            return None
+
+    def _apply(target: dict, font) -> None:
+        ff = _font_family(font)
+        if ff:
+            target["fontFamily"] = ff
+        fs = _font_size_pt(font)
+        if fs:
+            target["fontSize"] = fs
+        fw = _font_weight(font)
+        if fw:
+            target["fontWeight"] = fw
+        fc = _color_hex(font)
+        if fc and fc.lower() not in ("#000000", "#auto", "#none"):
+            target["color"] = fc
+
+    # Try to read from the document's named styles
+    try:
+        styles = doc.styles
+        for style in styles:
+            name_lc = (style.name or "").lower()
+            font = style.font
+            if "heading 1" in name_lc or "title" in name_lc:
+                _apply(design["elements"]["nameContact"], font)
+            elif "heading 2" in name_lc:
+                _apply(design["elements"]["sectionHeader"], font)
+                sz = _font_size_pt(font)
+                if sz and sz > 0:
+                    cap = getattr(font, "all_caps", None)
+                    if cap:
+                        design["elements"]["sectionHeader"]["textTransform"] = "uppercase"
+            elif "heading 3" in name_lc:
+                for key in ("roleHeader", "educationHeader", "projectHeader", "volunteerHeader"):
+                    _apply(design["elements"][key], font)
+            elif name_lc in ("normal", "default paragraph font", "body text"):
+                for key in ("body", "bullet", "skillsBlock"):
+                    _apply(design["elements"][key], font)
+    except Exception:
+        pass
+
+    # Walk actual paragraphs to refine guesses from real content
+    try:
+        for para in doc.paragraphs[:50]:  # limit to first 50 paragraphs
+            if not para.runs:
+                continue
+            run = para.runs[0]
+            text = para.text.strip()
+            if not text:
+                continue
+            # Heuristic: ALL CAPS short text → likely section header
+            if text == text.upper() and 3 < len(text) < 40 and not any(c.isdigit() for c in text):
+                _apply(design["elements"]["sectionHeader"], run.font)
+                if run.font.all_caps or text == text.upper():
+                    design["elements"]["sectionHeader"]["textTransform"] = "uppercase"
+            # Heuristic: large first paragraph → likely name
+            elif para == doc.paragraphs[0] and _font_size_pt(run.font) and _font_size_pt(run.font) > 12:
+                _apply(design["elements"]["nameContact"], run.font)
+                design["elements"]["nameContact"]["fontSize"] = _font_size_pt(run.font) or 16
+    except Exception:
+        pass
+
+    return design
+
+
+def extract_design_from_pdf(file_bytes: bytes) -> dict:
+    """Infer resume design settings from a PDF by extracting text and using AI.
+
+    Falls back to defaults if extraction fails.
+    """
+    resume_text = ""
+
+    # Try pdfminer first
+    try:
+        import io
+        from pdfminer.high_level import extract_text as pdf_extract_text
+        resume_text = pdf_extract_text(io.BytesIO(file_bytes))
+    except Exception:
+        pass
+
+    # Fallback: pypdf
+    if not resume_text.strip():
+        try:
+            import io
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+            resume_text = "\n".join(
+                page.extract_text() or "" for page in reader.pages
+            )
+        except Exception:
+            pass
+
+    if not resume_text.strip():
+        return json.loads(json.dumps(_DEFAULT_DESIGN))
+
+    prompt = PARSE_RESUME_DESIGN.format(resume_text=resume_text[:6000])
+    try:
+        result = _call_gemini(prompt, max_output_tokens=4096, json_mode=True)
+        cleaned = result.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        parsed = json.loads(cleaned)
+        # Merge with defaults to fill any missing keys
+        design = json.loads(json.dumps(_DEFAULT_DESIGN))
+        for k, v in parsed.items():
+            if k == "elements" and isinstance(v, dict):
+                for ek, ev in v.items():
+                    if ek in design["elements"] and isinstance(ev, dict):
+                        design["elements"][ek].update(ev)
+            else:
+                design[k] = v
+        return design
+    except Exception:
+        return json.loads(json.dumps(_DEFAULT_DESIGN))

@@ -28,6 +28,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <Link href="/maker" className="rounded-md px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
               Maker
             </Link>
+            <Link href="/designer" className="rounded-md px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
+              Designer
+            </Link>
             <Link href="/my-info" className="rounded-md px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
               My Info
             </Link>

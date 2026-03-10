@@ -12,7 +12,7 @@ export default async function SessionPage({
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [{ data: session }, { data: activities }, { data: profile }] =
+  const [{ data: session }, { data: activities }, { data: profile }, { data: education }] =
     await Promise.all([
       supabase
         .from("pipeline_sessions")
@@ -27,9 +27,14 @@ export default async function SessionPage({
         .order("created_at", { ascending: false }),
       supabase
         .from("profiles")
-        .select("name, email, phone, location, linkedin, website, section_order")
+        .select("name, email, phone, location, linkedin, website, section_order, skills, awards, certifications")
         .eq("id", user!.id)
         .single(),
+      supabase
+        .from("education")
+        .select("school, degree, field_of_study, location, start_date, end_date, gpa, description, bullets")
+        .eq("user_id", user!.id)
+        .order("sort_order"),
     ]);
 
   if (!session) notFound();
@@ -53,6 +58,7 @@ export default async function SessionPage({
         session={session}
         activities={activities ?? []}
         profile={profile ?? null}
+        education={education ?? []}
       />
     </div>
   );

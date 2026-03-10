@@ -5,8 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/maker",   label: "Maker" },
-  { href: "/my-info", label: "My Info" },
+  { href: "/maker",    label: "Maker" },
+  { href: "/designer", label: "Designer" },
+  { href: "/my-info",  label: "My Info" },
 ];
 
 export default function MobileNav() {

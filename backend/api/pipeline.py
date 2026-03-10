@@ -150,6 +150,7 @@ class StatementOut(BaseModel):
 
 class Step5Response(BaseModel):
     statements: list[StatementOut]
+    thinking: str = ""
 
 
 class ResumeTemplateIn(BaseModel):
@@ -160,6 +161,10 @@ class ResumeTemplateIn(BaseModel):
     linkedin: str = ""
     website: str = ""
     sections: list[str] = ["summary", "experience", "education", "skills"]
+    skills: list[str] = []
+    awards: list[str] = []
+    certifications: list[str] = []
+    education: list[dict] = []
 
 
 class Step6Request(BaseModel):
@@ -172,6 +177,7 @@ class Step6Request(BaseModel):
 
 class Step6Response(BaseModel):
     ats_resume: str
+    thinking: str = ""
 
 
 class Step7Request(BaseModel):
@@ -182,6 +188,7 @@ class Step7Request(BaseModel):
 
 class Step7Response(BaseModel):
     final_resume: str
+    thinking: str = ""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -351,7 +358,7 @@ async def step5(req: Step5Request):
         activities = [_to_activity_bullet(a) for a in req.activities]
         activities_by_id = {a.bullet_id: a for a in activities}
 
-        results = step5_generate_statements(
+        results, thinking = step5_generate_statements(
             ats_rubric=ats_rubric,
             activities_by_id=activities_by_id,
             selections=req.selections,
@@ -374,7 +381,8 @@ async def step5(req: Step5Request):
                     rewrite_logic=r.get("rewrite_logic", ""),
                 )
                 for r in results
-            ]
+            ],
+            thinking=thinking,
         )
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
@@ -392,18 +400,22 @@ async def step6(req: Step6Request):
             linkedin=req.template.linkedin,
             website=req.template.website,
             sections=req.template.sections,
+            skills=req.template.skills,
+            awards=req.template.awards,
+            certifications=req.template.certifications,
+            education=req.template.education,
         )
         # Convert StatementOut back to plain dicts for the pipeline function
         statements = [s.model_dump() for s in req.statements]
 
-        ats_resume = step6_assemble_ats_resume(
+        ats_resume, thinking = step6_assemble_ats_resume(
             template=template,
             statements=statements,
             role_context=req.role_context,
             holistic_person=req.holistic_person,
             consolidated_skills=req.consolidated_skills or None,
         )
-        return Step6Response(ats_resume=ats_resume)
+        return Step6Response(ats_resume=ats_resume, thinking=thinking)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
 
@@ -413,11 +425,11 @@ async def step7(req: Step7Request):
     """Rewrite the ATS resume to align with intent rubric."""
     try:
         intent_rubric = _to_intent_rubric(req.intent_rubric)
-        final = step7_intent_rewrite(
+        final, thinking = step7_intent_rewrite(
             ats_resume=req.ats_resume,
             intent_rubric=intent_rubric,
             ats_keywords=req.ats_keywords or None,
         )
-        return Step7Response(final_resume=final)
+        return Step7Response(final_resume=final, thinking=thinking)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc

@@ -209,8 +209,17 @@ TEMPLATE STRUCTURE:
   Website: {website}
   Sections: {sections}
 
-CONSOLIDATED SKILLS (extracted from selected activities):
+CONSOLIDATED SKILLS (extracted from selected activities + user profile):
 {skills_list}
+
+EDUCATION DATA:
+{education_block}
+
+AWARDS:
+{awards_list}
+
+CERTIFICATIONS:
+{certifications_list}
 
 ═══════════════════════════════════════════════════════════
 PRE-GROUPED WORK HISTORY — COPY THESE BULLETS VERBATIM
@@ -224,7 +233,7 @@ FORMATTING RULES:
 1. Output the experience section using EXACTLY the roles and bullets above — no additions, no omissions, no rewording
 2. Order sections to match: {sections}
 3. Order jobs reverse-chronologically (most recent first)
-4. For the skills section, organize the consolidated skills into logical categories (Languages, Frameworks, Tools, Methodologies)
+4. For the skills section, organize the skills into logical categories (Languages, Frameworks, Tools, Methodologies)
 5. Order skills to lead with those most relevant to the target role
 6. If the template includes a summary/objective section, write a concise 2-3 sentence professional summary using the target role context and ideal candidate profile above
 7. Do NOT fabricate any content outside of the summary — all experience bullets come from the pre-grouped block above
@@ -241,10 +250,11 @@ For each section in [{sections}], output a section header in ALL CAPS followed b
 
 - summary → Write a 2-3 sentence professional summary using the role context and ideal candidate profile.
 - experience → Copy EVERY role and bullet from the PRE-GROUPED WORK HISTORY block above, verbatim. Do not skip any bullet. Do not reword. Paste them exactly.
-- education → Output the section header. Leave the content blank (the user will fill it in).
+- education → Output the section header in ALL CAPS, then format and output every entry from the EDUCATION DATA block above (school, degree, field, dates, GPA if present, description/bullets if present). If EDUCATION DATA is empty, output the header and leave it blank.
 - projects → Output the section header. Leave the content blank (the user will fill it in).
-- skills → Organize the consolidated skills into logical categories (Languages, Frameworks, Tools, Methodologies). Order by relevance to the target role.
-- certifications → Output the section header. Leave the content blank (the user will fill it in).
+- skills → Organize all skills from CONSOLIDATED SKILLS into logical categories (Languages, Frameworks, Tools, Methodologies). Order by relevance to the target role. If CONSOLIDATED SKILLS is empty, output the header and leave it blank.
+- awards → If AWARDS is non-empty, output the section header in ALL CAPS and list each award. Otherwise skip this section.
+- certifications → If CERTIFICATIONS is non-empty, output the section header in ALL CAPS and list each certification. Otherwise skip this section.
 - For any other section → Output the section header and leave the content blank.
 
 CRITICAL: The experience section MUST contain all the role headers and bullet points from the PRE-GROUPED WORK HISTORY block. Do not output an empty experience section.
@@ -283,6 +293,28 @@ EDITING RULES — READ CAREFULLY:
 9. If a bullet is already well-aligned, copy it VERBATIM. Most bullets should be unchanged.
 
 Return the COMPLETE resume as formatted plain text, with only the minimal edits applied.
+"""
+
+POLISH_RESUME = """\
+You are an expert resume editor. You have a complete, ATS-optimized resume and a specific
+instruction from the user. Apply the instruction precisely and return the full polished resume.
+
+CURRENT RESUME:
+{resume_text}
+
+USER INSTRUCTION:
+{instruction}
+
+RULES:
+1. Apply ONLY what the instruction asks — do not make unrequested changes.
+2. Preserve the exact formatting: ALL CAPS section headers, role | company | dates | location lines,
+   bullet points starting with •, and blank lines between sections.
+3. Do NOT fabricate new accomplishments, job titles, companies, or dates.
+4. Do NOT add sections that aren't already present.
+5. If the instruction asks to improve language or tighten bullets, do so conservatively.
+6. Keep the candidate's natural voice — no flowery marketing language.
+
+Return the COMPLETE resume as formatted plain text with only the requested changes applied.
 """
 
 EXTRACT_ACTIVITY_SKILLS = """\
@@ -575,4 +607,134 @@ Rules:
 - Infer entry_type from context (internship → "work", side project → "project", etc.).
 - extracted_skills: 3–10 specific skills, tools, or technologies per entry.
 - Write situation/action/impact as polished resume-style prose (past tense, active voice).
+"""
+
+PARSE_RESUME_DESIGN = """\
+You are a professional typographer and document designer. Analyze the resume text below and infer
+the typographic design settings the author likely intended.
+
+RESUME TEXT:
+---
+{resume_text}
+---
+
+Return ONLY a valid JSON object matching this exact schema (no markdown, no extra text):
+{{
+  "pages": 1,
+  "pageSize": "letter",
+  "marginX": 1.0,
+  "marginY": 0.75,
+  "accentColor": "#bbbbbb",
+  "showDividers": true,
+  "elements": {{
+    "nameContact": {{
+      "fontFamily": "Georgia, 'Times New Roman', serif",
+      "fontSize": 16,
+      "fontWeight": "700",
+      "color": "#111111",
+      "textTransform": "none",
+      "letterSpacing": "0em",
+      "lineHeight": 1.3,
+      "textAlign": "center",
+      "borderBottom": "none"
+    }},
+    "sectionHeader": {{
+      "fontFamily": "Arial, Helvetica, sans-serif",
+      "fontSize": 9,
+      "fontWeight": "700",
+      "color": "#111111",
+      "textTransform": "uppercase",
+      "letterSpacing": "0.1em",
+      "lineHeight": 1.4,
+      "textAlign": "left",
+      "borderBottom": "1px solid #bbbbbb"
+    }},
+    "roleHeader": {{
+      "fontFamily": "Georgia, 'Times New Roman', serif",
+      "fontSize": 10.5,
+      "fontWeight": "600",
+      "color": "#111111",
+      "textTransform": "none",
+      "letterSpacing": "0em",
+      "lineHeight": 1.55,
+      "textAlign": "left",
+      "borderBottom": "none"
+    }},
+    "educationHeader": {{
+      "fontFamily": "Georgia, 'Times New Roman', serif",
+      "fontSize": 10.5,
+      "fontWeight": "600",
+      "color": "#111111",
+      "textTransform": "none",
+      "letterSpacing": "0em",
+      "lineHeight": 1.55,
+      "textAlign": "left",
+      "borderBottom": "none"
+    }},
+    "projectHeader": {{
+      "fontFamily": "Georgia, 'Times New Roman', serif",
+      "fontSize": 10.5,
+      "fontWeight": "600",
+      "color": "#111111",
+      "textTransform": "none",
+      "letterSpacing": "0em",
+      "lineHeight": 1.55,
+      "textAlign": "left",
+      "borderBottom": "none"
+    }},
+    "volunteerHeader": {{
+      "fontFamily": "Georgia, 'Times New Roman', serif",
+      "fontSize": 10.5,
+      "fontWeight": "600",
+      "color": "#111111",
+      "textTransform": "none",
+      "letterSpacing": "0em",
+      "lineHeight": 1.55,
+      "textAlign": "left",
+      "borderBottom": "none"
+    }},
+    "skillsBlock": {{
+      "fontFamily": "Georgia, 'Times New Roman', serif",
+      "fontSize": 10.5,
+      "fontWeight": "400",
+      "color": "#222222",
+      "textTransform": "none",
+      "letterSpacing": "0em",
+      "lineHeight": 1.55,
+      "textAlign": "left",
+      "borderBottom": "none"
+    }},
+    "body": {{
+      "fontFamily": "Georgia, 'Times New Roman', serif",
+      "fontSize": 10.5,
+      "fontWeight": "400",
+      "color": "#222222",
+      "textTransform": "none",
+      "letterSpacing": "0em",
+      "lineHeight": 1.55,
+      "textAlign": "left",
+      "borderBottom": "none"
+    }},
+    "bullet": {{
+      "fontFamily": "Georgia, 'Times New Roman', serif",
+      "fontSize": 10.5,
+      "fontWeight": "400",
+      "color": "#222222",
+      "textTransform": "none",
+      "letterSpacing": "0em",
+      "lineHeight": 1.55,
+      "textAlign": "left",
+      "borderBottom": "none"
+    }}
+  }}
+}}
+
+INSTRUCTIONS:
+- Infer font choices from the content style (professional/conservative → serif; modern/clean → sans-serif)
+- Infer section header capitalization style (ALL CAPS → textTransform: uppercase)
+- Infer whether dividers/lines appear under section headers
+- Set accentColor to the hex color that best matches divider/header accent colors you detect
+- Return sensible defaults for any property you cannot determine from the text
+- All fontSize values must be numbers (pt), all color values must be hex strings
+- fontWeight must be one of: "400", "500", "600", "700"
 """

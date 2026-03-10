@@ -132,8 +132,9 @@ def step5_generate_statements(
         else:
             rewrite_logic = f"{primary_rubric.item} ({primary_rubric.priority} — highest priority)"
 
+        thinking_text = ""
         try:
-            statement = write_sti_statement(
+            statement, thinking_text = write_sti_statement(
                 primary_rubric,
                 activity,
                 holistic_person=holistic_person,
@@ -154,6 +155,7 @@ def step5_generate_statements(
         return {
             "bullet_id": activity.bullet_id,
             "statement": statement,
+            "thinking": thinking_text,
             "error": error_msg,
             "job_title": activity.job_title,
             "company": activity.company,
@@ -180,6 +182,7 @@ def step5_generate_statements(
                 results_map[bid] = {
                     "bullet_id": bid,
                     "statement": "",
+                    "thinking": "",
                     "error": str(exc),
                     "job_title": activity.job_title,
                     "company": activity.company,
@@ -194,8 +197,18 @@ def step5_generate_statements(
 
     # Restore sort order, then fix any repeated opening verbs
     results = [results_map[bid] for bid in sorted_bullet_ids]
+
+    # Aggregate all per-bullet thinking into one block
+    thinking_blocks = []
+    for r in results:
+        t = r.pop("thinking", "")
+        if t and r.get("job_title"):
+            label = f"{r['job_title']} @ {r['company']}".strip(" @")
+            thinking_blocks.append(f"### {label}\n{t}")
+    combined_thinking = "\n\n---\n\n".join(thinking_blocks)
+
     results = dedup_bullets(results)
-    return results
+    return results, combined_thinking
 
 
 def step6_assemble_ats_resume(
@@ -204,8 +217,12 @@ def step6_assemble_ats_resume(
     role_context: str = "",
     holistic_person: str = "",
     consolidated_skills: list[str] | None = None,
-) -> str:
-    """Step 6: Assemble S-T-I statements into ATS-optimized resume."""
+) -> tuple[str, str]:
+    """Step 6: Assemble S-T-I statements into ATS-optimized resume.
+
+    Returns:
+        (ats_resume_text, thinking_text)
+    """
     return assemble_resume(
         template,
         statements,
@@ -219,6 +236,10 @@ def step7_intent_rewrite(
     ats_resume: str,
     intent_rubric: IntentRubric,
     ats_keywords: list[str] | None = None,
-) -> str:
-    """Step 7: Rewrite resume to align with intent rubric."""
+) -> tuple[str, str]:
+    """Step 7: Rewrite resume to align with intent rubric.
+
+    Returns:
+        (final_resume_text, thinking_text)
+    """
     return intent_rewrite(ats_resume, intent_rubric, ats_keywords=ats_keywords)
