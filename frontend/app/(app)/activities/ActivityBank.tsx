@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import ActivityModal from "./ActivityModal";
 import ProfileSection, { ProfileSectionHandle } from "./ProfileSection";
 import ReviewPanel from "./ReviewPanel";
+import PasteTextModal from "./PasteTextModal";
+import ActivityModal from "./ActivityModal";
 import type { ProfileData, EduRow } from "./ProfileSection";
 
 export interface Activity {
@@ -37,14 +38,11 @@ const TYPE_COLORS: Record<string, string> = {
   other: "bg-zinc-100 text-zinc-600 ring-1 ring-zinc-200",
 };
 
+const ENTRY_TYPES = ["work", "project", "competition", "volunteering", "other"];
 const FILTERS = ["all", "work", "project", "competition", "volunteering", "other"];
 
-function genBulletId() {
+export function genBulletId() {
   return `act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function truncate(text: string, n = 120) {
-  return text.length > n ? text.slice(0, n) + "…" : text;
 }
 
 interface ParsedResume {
@@ -52,6 +50,190 @@ interface ParsedResume {
   education: Omit<EduRow, "id">[];
   activities: Activity[];
 }
+
+// ── Editable Cell ────────────────────────────────────────────────────────────
+
+function EditableCell({
+  value,
+  multiline = false,
+  placeholder = "—",
+  onBlur,
+  className = "",
+}: {
+  value: string;
+  multiline?: boolean;
+  placeholder?: string;
+  onBlur: (v: string) => void;
+  className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
+
+  useEffect(() => { setDraft(value); }, [value]);
+
+  function startEdit() {
+    setDraft(value);
+    setEditing(true);
+    setTimeout(() => ref.current?.focus(), 0);
+  }
+
+  function commit() {
+    setEditing(false);
+    if (draft !== value) onBlur(draft);
+  }
+
+  if (!editing) {
+    return (
+      <div
+        onClick={startEdit}
+        className={`cursor-text min-h-[24px] text-sm leading-snug ${value ? "text-zinc-800" : "text-zinc-300 italic"} ${className}`}
+      >
+        {value || placeholder}
+      </div>
+    );
+  }
+
+  if (multiline) {
+    return (
+      <textarea
+        ref={ref as React.RefObject<HTMLTextAreaElement>}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        rows={3}
+        className={`w-full text-sm text-zinc-900 border border-zinc-300 rounded-md px-2 py-1.5 resize-y focus:outline-none focus:ring-2 focus:ring-zinc-300 ${className}`}
+      />
+    );
+  }
+
+  return (
+    <input
+      ref={ref as React.RefObject<HTMLInputElement>}
+      type="text"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+      className={`w-full text-sm text-zinc-900 border border-zinc-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-zinc-300 ${className}`}
+    />
+  );
+}
+
+// ── Table Row ────────────────────────────────────────────────────────────────
+
+function ActivityRow({
+  activity,
+  onUpdate,
+  onDelete,
+  onEdit,
+}: {
+  activity: Activity;
+  onUpdate: (updated: Activity) => void;
+  onDelete: (bulletId: string) => void;
+  onEdit: (activity: Activity) => void;
+}) {
+  const [typeOpen, setTypeOpen] = useState(false);
+
+  function field(key: keyof Activity, multiline = false, placeholder?: string) {
+    return (
+      <EditableCell
+        value={(activity[key] as string) ?? ""}
+        multiline={multiline}
+        placeholder={placeholder}
+        onBlur={(v) => onUpdate({ ...activity, [key]: v })}
+      />
+    );
+  }
+
+  return (
+    <tr className="group border-b border-zinc-100 hover:bg-zinc-50/50 transition-colors align-top">
+      {/* Type */}
+      <td className="px-3 py-2.5 min-w-[90px]">
+        <div className="relative">
+          <button
+            onClick={() => setTypeOpen((v) => !v)}
+            className={`rounded-md px-2 py-0.5 text-xs font-medium cursor-pointer ${TYPE_COLORS[activity.entry_type] ?? TYPE_COLORS.other}`}
+          >
+            {TYPE_LABELS[activity.entry_type] ?? activity.entry_type}
+          </button>
+          {typeOpen && (
+            <div className="absolute top-full left-0 mt-1 z-20 bg-white border border-zinc-200 rounded-lg shadow-lg overflow-hidden min-w-[120px]">
+              {ENTRY_TYPES.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => { onUpdate({ ...activity, entry_type: t }); setTypeOpen(false); }}
+                  className="block w-full text-left px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-50 transition-colors"
+                >
+                  {TYPE_LABELS[t]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </td>
+
+      {/* Title */}
+      <td className="px-3 py-2.5 min-w-[140px]">{field("job_title", false, "Role / title")}</td>
+
+      {/* Company */}
+      <td className="px-3 py-2.5 min-w-[110px]">{field("company", false, "Company")}</td>
+
+      {/* Dates */}
+      <td className="px-3 py-2.5 min-w-[100px]">{field("dates_worked", false, "Dates")}</td>
+
+      {/* Action — widest, most important */}
+      <td className="px-3 py-2.5 min-w-[240px]">{field("action", true, "What did you do?")}</td>
+
+      {/* Situation */}
+      <td className="px-3 py-2.5 min-w-[200px]">{field("situation", true, "Context / challenge")}</td>
+
+      {/* Impact */}
+      <td className="px-3 py-2.5 min-w-[180px]">{field("impact", true, "Measurable result")}</td>
+
+      {/* Skills — show chips, edit via modal */}
+      <td className="px-3 py-2.5 min-w-[130px]">
+        <div className="flex flex-wrap gap-1">
+          {activity.extracted_skills.slice(0, 4).map((s) => (
+            <span key={s} className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-600">{s}</span>
+          ))}
+          {activity.extracted_skills.length > 4 && (
+            <span className="text-xs text-zinc-400">+{activity.extracted_skills.length - 4}</span>
+          )}
+          {activity.extracted_skills.length === 0 && (
+            <span className="text-xs text-zinc-300 italic">—</span>
+          )}
+        </div>
+      </td>
+
+      {/* Actions */}
+      <td className="px-3 py-2.5 min-w-[60px]">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={() => onEdit(activity)}
+            className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors"
+            title="Edit all fields"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
+          <button
+            onClick={() => onDelete(activity.bullet_id)}
+            className="p-1 rounded text-zinc-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+            title="Delete"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
 
 export default function ActivityBank({
   userId,
@@ -69,8 +251,8 @@ export default function ActivityBank({
 
   const [activities, setActivities] = useState<Activity[]>(initialActivities);
   const [filter, setFilter] = useState("all");
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -78,19 +260,14 @@ export default function ActivityBank({
   const fileRef = useRef<HTMLInputElement>(null);
   const firstTimeFileRef = useRef<HTMLInputElement>(null);
 
-  // First-time vs returning detection (computed once on mount)
   const [isFirstTime] = useState(!initialProfile?.name && initialActivities.length === 0);
-  // First-time: user chose "start from scratch" instead of uploading
   const [startedManually, setStartedManually] = useState(false);
-  // First-time: parsed resume ready for review
   const [reviewData, setReviewData] = useState<ParsedResume | null>(null);
-  // Returning: offer to update profile from a new upload
   const [parsedProfileOffer, setParsedProfileOffer] = useState<{ profile: Partial<ProfileData>; education: Omit<EduRow, "id">[] } | null>(null);
 
-  // ── Pick up data / mode stored by dashboard WelcomeBox ───────────────────
+  // ── Pick up sessionStorage data from dashboard ────────────────────────────
 
   useEffect(() => {
-    // Pending parsed resume from dashboard upload or Jake demo
     const pending = sessionStorage.getItem("pendingResumeData");
     if (pending) {
       sessionStorage.removeItem("pendingResumeData");
@@ -123,7 +300,7 @@ export default function ActivityBank({
           })
         );
         const activitiesData: Activity[] = (raw.activities ?? []).map((a: Record<string, unknown>) => ({
-          bullet_id: (a.bullet_id as string) || `act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          bullet_id: (a.bullet_id as string) || genBulletId(),
           entry_type: (a.entry_type as string) ?? "work",
           job_title: (a.job_title as string) ?? "",
           company: (a.company as string) ?? "",
@@ -135,17 +312,14 @@ export default function ActivityBank({
           extracted_skills: (a.extracted_skills as string[]) ?? [],
         }));
         if (isFirstTime) {
-          // First-time: show full review panel (profile + activities together)
           setReviewData({ profile: profileData, education: educationData, activities: activitiesData });
         } else {
-          // Returning: just offer to update profile fields (don't re-insert activities)
           setParsedProfileOffer({ profile: profileData, education: educationData });
         }
         return;
       } catch {}
     }
 
-    // Manual setup mode from dashboard
     const mode = sessionStorage.getItem("setupMode");
     if (mode === "manual") {
       sessionStorage.removeItem("setupMode");
@@ -156,9 +330,9 @@ export default function ActivityBank({
 
   const filtered = filter === "all" ? activities : activities.filter((a) => a.entry_type === filter);
 
-  // ── Save (create or update) ──────────────────────────────────────────────
+  // ── Save ──────────────────────────────────────────────────────────────────
 
-  async function saveActivity(data: Omit<Activity, "id">) {
+  const saveActivity = useCallback(async (data: Omit<Activity, "id">) => {
     const existing = activities.find((a) => a.bullet_id === data.bullet_id);
     if (existing?.id) {
       const { error } = await supabase.from("activities").update({ ...data }).eq("id", existing.id);
@@ -173,24 +347,30 @@ export default function ActivityBank({
       if (error) throw new Error(error.message);
       setActivities((prev) => [{ ...data, id: row.id }, ...prev]);
     }
+  }, [activities, supabase, userId]);
+
+  // ── Update (from inline table edit) ──────────────────────────────────────
+
+  async function updateActivity(updated: Activity) {
+    const { id, ...data } = updated;
+    if (id) {
+      await supabase.from("activities").update(data).eq("id", id);
+    }
+    setActivities((prev) => prev.map((a) => (a.bullet_id === updated.bullet_id ? updated : a)));
   }
 
-  // ── Delete ───────────────────────────────────────────────────────────────
+  // ── Delete ────────────────────────────────────────────────────────────────
 
   async function deleteActivity(bulletId: string) {
     const activity = activities.find((a) => a.bullet_id === bulletId);
     if (!activity?.id) return;
     await supabase.from("activities").delete().eq("id", activity.id);
     setActivities((prev) => prev.filter((a) => a.bullet_id !== bulletId));
-    if (expanded === bulletId) setExpanded(null);
   }
 
-  // ── Upload resume → parse via FastAPI ────────────────────────────────────
+  // ── Upload resume → parse ─────────────────────────────────────────────────
 
-  async function handleUpload(
-    e: React.ChangeEvent<HTMLInputElement>,
-    mode: "firsttime" | "returning"
-  ) {
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>, mode: "firsttime" | "returning") {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
@@ -224,16 +404,10 @@ export default function ActivityBank({
         certifications: parsed.profile.certifications ?? [],
       };
       const educationData: Omit<EduRow, "id">[] = (parsed.profile.education ?? []).map((e, i) => ({
-        sort_order: i,
-        school: e.school ?? "",
-        degree: e.degree ?? "",
-        field_of_study: e.field_of_study ?? "",
-        location: e.location ?? "",
-        start_date: e.start_date ?? "",
-        end_date: e.end_date ?? "",
-        gpa: e.gpa ?? "",
-        description: e.description ?? "",
-        bullets: e.bullets ?? [],
+        sort_order: i, school: e.school ?? "", degree: e.degree ?? "",
+        field_of_study: e.field_of_study ?? "", location: e.location ?? "",
+        start_date: e.start_date ?? "", end_date: e.end_date ?? "",
+        gpa: e.gpa ?? "", description: e.description ?? "", bullets: e.bullets ?? [],
       }));
       const activitiesData: Activity[] = parsed.activities.map((a) => ({
         bullet_id: a.bullet_id || genBulletId(),
@@ -249,10 +423,8 @@ export default function ActivityBank({
       }));
 
       if (mode === "firsttime") {
-        // Show review panel — user confirms before anything is saved
         setReviewData({ profile: profileData, education: educationData, activities: activitiesData });
       } else {
-        // Returning: insert activities immediately, offer profile update separately
         const toInsert = activitiesData.map((a) => ({ user_id: userId, ...a }));
         const { data: inserted, error } = await supabase
           .from("activities")
@@ -261,7 +433,6 @@ export default function ActivityBank({
         if (error) throw new Error(error.message);
         setActivities((prev) => [...(inserted ?? []), ...prev]);
         setUploadCount(inserted?.length ?? 0);
-        // Offer profile update if there's meaningful profile data
         if (profileData.name || (profileData.skills?.length ?? 0) > 0) {
           setParsedProfileOffer({ profile: profileData, education: educationData });
         }
@@ -275,13 +446,13 @@ export default function ActivityBank({
     }
   }
 
-  // ── First-time: review mode ──────────────────────────────────────────────
+  // ── First-time: review mode ───────────────────────────────────────────────
 
   if (isFirstTime && reviewData) {
     return <ReviewPanel parsed={reviewData} userId={userId} />;
   }
 
-  // ── First-time: empty start ──────────────────────────────────────────────
+  // ── First-time: empty start ───────────────────────────────────────────────
 
   if (isFirstTime && !startedManually) {
     return (
@@ -295,19 +466,10 @@ export default function ActivityBank({
         <div className="flex flex-col items-center gap-3">
           <label className={`rounded-xl bg-zinc-900 px-6 py-3 text-sm font-medium text-white hover:bg-zinc-700 transition-colors cursor-pointer ${uploading ? "opacity-50 pointer-events-none" : ""}`}>
             {uploading ? "Parsing your resume…" : "Upload your resume"}
-            <input
-              ref={firstTimeFileRef}
-              type="file"
-              accept=".pdf,.docx"
-              className="hidden"
-              onChange={(e) => handleUpload(e, "firsttime")}
-            />
+            <input ref={firstTimeFileRef} type="file" accept=".pdf,.docx" className="hidden" onChange={(e) => handleUpload(e, "firsttime")} />
           </label>
           {uploadError && <p className="text-sm text-red-600">{uploadError}</p>}
-          <button
-            onClick={() => setStartedManually(true)}
-            className="text-sm text-zinc-400 hover:text-zinc-600 transition-colors"
-          >
+          <button onClick={() => setStartedManually(true)} className="text-sm text-zinc-400 hover:text-zinc-600 transition-colors">
             Start from scratch instead →
           </button>
         </div>
@@ -315,7 +477,7 @@ export default function ActivityBank({
     );
   }
 
-  // ── Normal view ──────────────────────────────────────────────────────────
+  // ── Normal view ───────────────────────────────────────────────────────────
 
   return (
     <div>
@@ -328,32 +490,26 @@ export default function ActivityBank({
         defaultExpanded={startedManually && !initialProfile?.name}
       />
 
-      {/* "Update profile?" offer after returning upload */}
+      {/* "Update profile?" offer */}
       {parsedProfileOffer && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 mb-6 flex items-center gap-3">
           <p className="text-sm text-amber-800 flex-1">
             Your resume has updated profile info — want to apply it?
           </p>
           <button
-            onClick={() => {
-              profileRef.current?.populate(parsedProfileOffer.profile, parsedProfileOffer.education);
-              setParsedProfileOffer(null);
-            }}
+            onClick={() => { profileRef.current?.populate(parsedProfileOffer.profile, parsedProfileOffer.education); setParsedProfileOffer(null); }}
             className="rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-900 transition-colors shrink-0"
           >
             Update profile
           </button>
-          <button
-            onClick={() => setParsedProfileOffer(null)}
-            className="text-amber-500 hover:text-amber-800 text-xs transition-colors"
-          >
+          <button onClick={() => setParsedProfileOffer(null)} className="text-amber-500 hover:text-amber-800 text-xs transition-colors">
             Dismiss
           </button>
         </div>
       )}
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
         <button
           onClick={() => {
             setEditingActivity({ bullet_id: genBulletId(), entry_type: "work", job_title: "", company: "", dates_worked: "", location: "", situation: "", action: "", impact: "", extracted_skills: [] });
@@ -362,6 +518,13 @@ export default function ActivityBank({
           className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 transition-colors"
         >
           + Add entry
+        </button>
+
+        <button
+          onClick={() => setPasteModalOpen(true)}
+          className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
+        >
+          + Add from text
         </button>
 
         <label className={`rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors cursor-pointer ${uploading ? "opacity-50 pointer-events-none" : ""}`}>
@@ -399,82 +562,40 @@ export default function ActivityBank({
         })}
       </div>
 
-      {/* List */}
+      {/* Table */}
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-300 p-12 text-center">
           <p className="text-zinc-500 text-sm">No entries yet.</p>
-          <p className="text-zinc-400 text-xs mt-1">Add one manually or upload a resume to get started.</p>
+          <p className="text-zinc-400 text-xs mt-1">Add one manually, paste text, or upload a resume.</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
-          {filtered.map((a) => (
-            <div key={a.bullet_id} className="bg-white rounded-xl border border-zinc-200 overflow-hidden">
-              <div
-                className="flex items-start gap-3 px-4 py-3.5 cursor-pointer hover:bg-zinc-50 transition-colors"
-                onClick={() => setExpanded(expanded === a.bullet_id ? null : a.bullet_id)}
-              >
-                <span className={`mt-0.5 shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${TYPE_COLORS[a.entry_type] ?? TYPE_COLORS.other}`}>
-                  {TYPE_LABELS[a.entry_type] ?? a.entry_type}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-zinc-900 truncate">
-                    {a.job_title || <span className="text-zinc-400 font-normal">Untitled</span>}
-                    {a.company && <span className="text-zinc-400 font-normal"> · {a.company}</span>}
-                  </p>
-                  {a.dates_worked && <p className="text-xs text-zinc-400 mt-0.5">{a.dates_worked}</p>}
-                  {expanded !== a.bullet_id && a.action && (
-                    <p className="text-xs text-zinc-500 mt-1 line-clamp-1">{truncate(a.action)}</p>
-                  )}
-                </div>
-                <span className="text-zinc-300 text-xs shrink-0 mt-1">{expanded === a.bullet_id ? "▲" : "▼"}</span>
-              </div>
-
-              {expanded === a.bullet_id && (
-                <div className="border-t border-zinc-100 px-4 py-4 bg-zinc-50 flex flex-col gap-3">
-                  {[
-                    { label: "Situation", value: a.situation },
-                    { label: "Action", value: a.action },
-                    { label: "Impact", value: a.impact },
-                  ].map(({ label, value }) => (
-                    <div key={label}>
-                      <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-1">{label}</p>
-                      <p className="text-sm text-zinc-700 leading-relaxed">
-                        {value || <span className="text-zinc-400 italic">Not provided</span>}
-                      </p>
-                    </div>
-                  ))}
-                  {a.extracted_skills.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-1.5">Skills</p>
-                      <div className="flex flex-wrap gap-1">
-                        {a.extracted_skills.map((s) => (
-                          <span key={s} className="rounded-md bg-white border border-zinc-200 px-2 py-0.5 text-xs text-zinc-600">{s}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex gap-2 pt-1">
-                    <button
-                      onClick={() => { setEditingActivity(a); setModalOpen(true); }}
-                      className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => deleteActivity(a.bullet_id)}
-                      className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+        <div className="overflow-x-auto rounded-xl border border-zinc-200">
+          <table className="w-full border-collapse bg-white text-left">
+            <thead>
+              <tr className="border-b border-zinc-200 bg-zinc-50">
+                {["Type", "Title", "Company", "Dates", "Action", "Situation", "Impact", "Skills", ""].map((h) => (
+                  <th key={h} className="px-3 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide whitespace-nowrap">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((a) => (
+                <ActivityRow
+                  key={a.bullet_id}
+                  activity={a}
+                  onUpdate={updateActivity}
+                  onDelete={deleteActivity}
+                  onEdit={(act) => { setEditingActivity(act); setModalOpen(true); }}
+                />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* Modal */}
+      {/* Full-edit modal (for skills and edge cases) */}
       {modalOpen && editingActivity && (
         <ActivityModal
           activity={editingActivity}
@@ -484,6 +605,15 @@ export default function ActivityBank({
             setModalOpen(false);
             setEditingActivity(null);
           }}
+        />
+      )}
+
+      {/* Paste text modal */}
+      {pasteModalOpen && (
+        <PasteTextModal
+          onClose={() => setPasteModalOpen(false)}
+          onSave={saveActivity}
+          genBulletId={genBulletId}
         />
       )}
     </div>

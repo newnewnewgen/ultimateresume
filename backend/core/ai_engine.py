@@ -31,6 +31,7 @@ from prompts.templates import (
     PARSE_PDF_RESUME_TEMPLATE,
     PARSE_RESUME_FULL,
     PARSE_RESUME_TO_ACTIVITY_BANK,
+    PARSE_RAW_TEXT_ACTIVITY,
     WRITE_STI_STATEMENT,
 )
 
@@ -447,6 +448,14 @@ def edit_latex_with_ai(latex: str, instruction: str) -> str:
     """Apply a user instruction to edit a LaTeX template."""
     prompt = EDIT_LATEX_TEMPLATE.format(latex=latex, instruction=instruction)
     return _call_gemini(prompt, max_output_tokens=8192, use_pro=False).strip()
+
+
+def parse_raw_text_to_activity(raw_text: str) -> dict:
+    """Parse free-form text into a structured STAR activity dict."""
+    prompt = PARSE_RAW_TEXT_ACTIVITY.format(raw_text=raw_text)
+    result = _call_gemini(prompt, max_output_tokens=2048, json_mode=True)
+    cleaned = result.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return json.loads(cleaned)
 
 
 def assemble_latex_resume(latex_template: str, resume_text: str, profile: dict) -> str:

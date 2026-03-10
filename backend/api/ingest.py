@@ -8,6 +8,7 @@ from core.ingest import (
     parse_activity_bank_json,
     parse_full_resume,
 )
+from core.ai_engine import parse_raw_text_to_activity
 
 router = APIRouter()
 
@@ -123,6 +124,44 @@ async def parse_resume(file: UploadFile = File(...)):
     return ParseResumeResponse(
         profile=_profile_out(profile),
         activities=[_activity_out(a) for a in activities],
+    )
+
+
+class ParseTextActivityRequest(BaseModel):
+    text: str
+
+
+class ParseTextActivityResponse(BaseModel):
+    entry_type: str
+    job_title: str
+    company: str
+    dates_worked: str
+    location: str
+    situation: str
+    action: str
+    impact: str
+    extracted_skills: list[str]
+
+
+@router.post("/text-activity", response_model=ParseTextActivityResponse)
+async def parse_text_activity(req: ParseTextActivityRequest):
+    """Parse raw pasted text into a structured STAR activity entry."""
+    if not req.text.strip():
+        raise HTTPException(400, "Text cannot be empty")
+    try:
+        result = parse_raw_text_to_activity(req.text)
+    except Exception as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return ParseTextActivityResponse(
+        entry_type=result.get("entry_type", "work"),
+        job_title=result.get("job_title", ""),
+        company=result.get("company", ""),
+        dates_worked=result.get("dates_worked", ""),
+        location=result.get("location", ""),
+        situation=result.get("situation", ""),
+        action=result.get("action", ""),
+        impact=result.get("impact", ""),
+        extracted_skills=result.get("extracted_skills", []),
     )
 
 
