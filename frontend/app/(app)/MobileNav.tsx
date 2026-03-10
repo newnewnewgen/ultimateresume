@@ -7,7 +7,6 @@ import { usePathname } from "next/navigation";
 const LINKS = [
   { href: "/sessions",   label: "Sessions" },
   { href: "/activities", label: "Activities" },
-  { href: "/profile",    label: "Profile" },
 ];
 
 export default function MobileNav() {

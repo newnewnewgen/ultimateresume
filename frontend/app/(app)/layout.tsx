@@ -31,9 +31,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <Link href="/activities" className="rounded-md px-3 py-1.5 text-sm text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
               Activities
             </Link>
-            <Link href="/profile" className="rounded-md px-3 py-1.5 text-sm text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
-              Profile
-            </Link>
           </div>
         </div>
         <div className="flex items-center gap-3">
