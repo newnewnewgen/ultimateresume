@@ -13,6 +13,7 @@ export function resumeTextToHtml(text: string): string {
   const lines = text.split("\n");
   let html = "";
   let inList = false;
+  let nonEmptyCount = 0;
 
   for (const raw of lines) {
     const line = raw.trimEnd();
@@ -21,6 +22,15 @@ export function resumeTextToHtml(text: string): string {
       if (inList) { html += "</ul>"; inList = false; }
       continue;
     }
+
+    // First non-empty line: name → h1
+    if (nonEmptyCount === 0) {
+      html += `<h1>${line.trim()}</h1>`;
+      nonEmptyCount++;
+      continue;
+    }
+
+    nonEmptyCount++;
 
     // Bullet
     if (/^[•\-\*]\s/.test(line.trim())) {
@@ -39,8 +49,9 @@ export function resumeTextToHtml(text: string): string {
       continue;
     }
 
-    // Role line: contains | (job title | company | dates)
-    if (t.includes("|")) {
+    // Role line: contains | — but only after the second non-empty line (contact line)
+    // nonEmptyCount is already incremented, so nonEmptyCount > 2 means we're past contact
+    if (t.includes("|") && nonEmptyCount > 2) {
       html += `<h3>${t}</h3>`;
       continue;
     }
@@ -56,6 +67,7 @@ export function resumeTextToHtml(text: string): string {
 
 export function htmlToResumeText(html: string): string {
   return html
+    .replace(/<h1[^>]*>(.*?)<\/h1>/gi, (_, t) => `${t}\n`)
     .replace(/<h2[^>]*>(.*?)<\/h2>/gi, (_, t) => `\n${t.toUpperCase()}\n`)
     .replace(/<h3[^>]*>(.*?)<\/h3>/gi, (_, t) => `\n${t}\n`)
     .replace(/<li[^>]*>(.*?)<\/li>/gi, (_, t) => `• ${t}\n`)
@@ -113,12 +125,23 @@ interface Props {
   design?: ResumeDesign;
 }
 
+// Paper dimensions at max-w-[720px]:
+//   Letter  (8.5 × 11 in)  → 720 × 932 px
+//   A4      (210 × 297 mm) → 720 × 1018 px
+const PAPER_MIN_H: Record<"letter" | "A4", number> = {
+  letter: 932,
+  A4:     1018,
+};
+
 export default function ResumeEditor({ content, onChange, readOnly = false, design }: Props) {
   const d = design ? designToStyles(design) : designToStyles(DEFAULT_DESIGN);
   const accentColor = design?.accentColor ?? DEFAULT_DESIGN.accentColor;
   const showDividers = design?.showDividers ?? DEFAULT_DESIGN.showDividers;
   const marginX = design?.marginX ?? DEFAULT_DESIGN.marginX;
   const marginY = design?.marginY ?? DEFAULT_DESIGN.marginY;
+  const pageSize = design?.pageSize ?? DEFAULT_DESIGN.pageSize;
+  const paperMinH = PAPER_MIN_H[pageSize];
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -151,7 +174,7 @@ export default function ResumeEditor({ content, onChange, readOnly = false, desi
 
   return (
     <div className="flex flex-col gap-0">
-      {/* Toolbar */}
+      {/* Toolbar — edit mode only */}
       {!readOnly && (
         <div className="flex items-center gap-1 px-3 py-2 border border-zinc-200 rounded-t-xl bg-zinc-50 flex-wrap">
           <ToolbarBtn title="Bold" active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}>
@@ -186,8 +209,17 @@ export default function ResumeEditor({ content, onChange, readOnly = false, desi
         </div>
       )}
 
-      {/* Paper-like resume page */}
-      <div className={`bg-zinc-100 border border-zinc-200 ${readOnly ? "rounded-xl" : "rounded-b-xl border-t-0"} flex justify-center py-8 px-4 min-h-[600px]`}>
+      {/*
+        Paper container:
+          readOnly  → transparent (paper floats on designer gray bg)
+          edit mode → gray well with border and padding
+      */}
+      <div className={
+        readOnly
+          ? "flex justify-center"
+          : "bg-zinc-100 border border-zinc-200 rounded-b-xl border-t-0 flex justify-center py-8 px-4"
+      }>
+        {/* White paper — enforces correct letter / A4 aspect ratio via minHeight */}
         <div
           className="w-full max-w-[720px] bg-white shadow-[0_2px_20px_rgba(0,0,0,0.09)]"
           style={{
@@ -195,9 +227,26 @@ export default function ResumeEditor({ content, onChange, readOnly = false, desi
             paddingBottom: `${marginY * 96}px`,
             paddingLeft:   `${marginX * 96}px`,
             paddingRight:  `${marginX * 96}px`,
+            minHeight:     `${paperMinH}px`,
           }}
         >
           <style>{`
+            /* Name — h1 */
+            .resume-editor-content h1 {
+              font-family: ${d.nameContact.fontFamily};
+              font-size: ${d.nameContact.fontSize};
+              font-weight: ${d.nameContact.fontWeight};
+              color: ${d.nameContact.color};
+              text-align: ${d.nameContact.textAlign};
+              line-height: ${d.nameContact.lineHeight};
+              margin: 0 0 3px 0;
+            }
+            /* Contact line — the paragraph immediately after the name */
+            .resume-editor-content h1 + p {
+              text-align: center;
+              margin-bottom: 16px !important;
+            }
+            /* Section headers */
             .resume-editor-content h2 {
               font-family: ${d.sectionHeader.fontFamily};
               font-size: ${d.sectionHeader.fontSize};
@@ -211,6 +260,7 @@ export default function ResumeEditor({ content, onChange, readOnly = false, desi
               margin-top: 18px;
               margin-bottom: 5px;
             }
+            /* Role / company / date headers */
             .resume-editor-content h3 {
               font-family: ${d.roleHeader.fontFamily};
               font-size: ${d.roleHeader.fontSize};
@@ -219,6 +269,7 @@ export default function ResumeEditor({ content, onChange, readOnly = false, desi
               line-height: ${d.roleHeader.lineHeight};
               margin: 8px 0 1px 0;
             }
+            /* Body text */
             .resume-editor-content p {
               font-family: ${d.body.fontFamily};
               font-size: ${d.body.fontSize};
@@ -227,6 +278,7 @@ export default function ResumeEditor({ content, onChange, readOnly = false, desi
               line-height: ${d.body.lineHeight};
               margin: 2px 0;
             }
+            /* Bullet list */
             .resume-editor-content ul {
               padding-left: ${ptToPx(14)}px;
               margin: 2px 0 5px 0;

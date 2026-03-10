@@ -272,7 +272,7 @@ export const MODERN_DESIGN: ResumeDesign = {
     nameContact: {
       fontFamily:    CAL,
       fontSize:      22,
-      fontWeight:    "700",
+      fontWeight:    "400",
       color:         SLATE,
       textTransform: "none",
       letterSpacing: "0em",

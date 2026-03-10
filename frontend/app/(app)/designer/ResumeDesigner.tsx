@@ -68,7 +68,7 @@ const DUMMY_BLOCKS: Record<string, string[]> = {
 function buildDummyText(sections: SectionDef[]): string {
   const lines = [
     "Alexandra J. Morrison",
-    "San Francisco, CA  ·  alex.morrison@email.com  ·  (415) 555-0192  ·  linkedin.com/in/alexmorrison",
+    "(415) 555-0192  |  alex.morrison@email.com  |  linkedin.com/in/alexmorrison  |  San Francisco, CA",
     "",
   ];
   for (const sec of sections) {
@@ -271,7 +271,7 @@ export default function ResumeDesigner({ initialDesign }: Props) {
     update({ sections });
   };
 
-  // AI parser
+  // Import sections & margins from DOCX/PDF (typography is preserved from selected template)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -285,12 +285,19 @@ export default function ResumeDesigner({ initialDesign }: Props) {
       );
       if (!res.ok) throw new Error(await res.text());
       const parsed = await res.json();
-      const next = { ...DEFAULT_DESIGN, ...parsed, elements: { ...DEFAULT_DESIGN.elements, ...(parsed.elements ?? {}) } };
+      // Only apply sections order/enabled state and page margins — keep the current template's typography
+      const next: ResumeDesign = {
+        ...design,
+        ...(parsed.marginX != null ? { marginX: parsed.marginX } : {}),
+        ...(parsed.marginY != null ? { marginY: parsed.marginY } : {}),
+        ...(parsed.pageSize ? { pageSize: parsed.pageSize } : {}),
+        ...(parsed.sections ? { sections: parsed.sections } : {}),
+      };
       setDesign(next);
       save(next);
     } catch (err) {
-      console.error("AI parse failed:", err);
-      alert("Could not parse design from file.");
+      console.error("Import failed:", err);
+      alert("Could not import layout from file.");
     } finally {
       setParsing(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -311,7 +318,7 @@ export default function ResumeDesigner({ initialDesign }: Props) {
           <div className="flex items-center gap-2">
             <span className="text-xs text-zinc-400">{saving ? "Saving…" : saveMsg}</span>
             <label className="flex items-center gap-1 cursor-pointer rounded border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-white transition-colors bg-zinc-50">
-              {parsing ? "Parsing…" : "Import DOCX / PDF"}
+              {parsing ? "Importing…" : "Import sections & margins"}
               <input ref={fileRef} type="file" accept=".docx,.pdf" className="sr-only"
                 onChange={handleFileUpload} disabled={parsing} />
             </label>

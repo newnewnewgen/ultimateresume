@@ -610,8 +610,8 @@ Rules:
 """
 
 PARSE_RESUME_DESIGN = """\
-You are a professional typographer and document designer. Analyze the resume text below and infer
-the typographic design settings the author likely intended.
+You are a resume layout analyst. Analyze the resume text below and extract ONLY the page layout
+information: which sections are present (and in what order), and estimate the page margins.
 
 RESUME TEXT:
 ---
@@ -620,121 +620,29 @@ RESUME TEXT:
 
 Return ONLY a valid JSON object matching this exact schema (no markdown, no extra text):
 {{
-  "pages": 1,
   "pageSize": "letter",
-  "marginX": 1.0,
+  "marginX": 0.75,
   "marginY": 0.75,
-  "accentColor": "#bbbbbb",
-  "showDividers": true,
-  "elements": {{
-    "nameContact": {{
-      "fontFamily": "Georgia, 'Times New Roman', serif",
-      "fontSize": 16,
-      "fontWeight": "700",
-      "color": "#111111",
-      "textTransform": "none",
-      "letterSpacing": "0em",
-      "lineHeight": 1.3,
-      "textAlign": "center",
-      "borderBottom": "none"
-    }},
-    "sectionHeader": {{
-      "fontFamily": "Arial, Helvetica, sans-serif",
-      "fontSize": 9,
-      "fontWeight": "700",
-      "color": "#111111",
-      "textTransform": "uppercase",
-      "letterSpacing": "0.1em",
-      "lineHeight": 1.4,
-      "textAlign": "left",
-      "borderBottom": "1px solid #bbbbbb"
-    }},
-    "roleHeader": {{
-      "fontFamily": "Georgia, 'Times New Roman', serif",
-      "fontSize": 10.5,
-      "fontWeight": "600",
-      "color": "#111111",
-      "textTransform": "none",
-      "letterSpacing": "0em",
-      "lineHeight": 1.55,
-      "textAlign": "left",
-      "borderBottom": "none"
-    }},
-    "educationHeader": {{
-      "fontFamily": "Georgia, 'Times New Roman', serif",
-      "fontSize": 10.5,
-      "fontWeight": "600",
-      "color": "#111111",
-      "textTransform": "none",
-      "letterSpacing": "0em",
-      "lineHeight": 1.55,
-      "textAlign": "left",
-      "borderBottom": "none"
-    }},
-    "projectHeader": {{
-      "fontFamily": "Georgia, 'Times New Roman', serif",
-      "fontSize": 10.5,
-      "fontWeight": "600",
-      "color": "#111111",
-      "textTransform": "none",
-      "letterSpacing": "0em",
-      "lineHeight": 1.55,
-      "textAlign": "left",
-      "borderBottom": "none"
-    }},
-    "volunteerHeader": {{
-      "fontFamily": "Georgia, 'Times New Roman', serif",
-      "fontSize": 10.5,
-      "fontWeight": "600",
-      "color": "#111111",
-      "textTransform": "none",
-      "letterSpacing": "0em",
-      "lineHeight": 1.55,
-      "textAlign": "left",
-      "borderBottom": "none"
-    }},
-    "skillsBlock": {{
-      "fontFamily": "Georgia, 'Times New Roman', serif",
-      "fontSize": 10.5,
-      "fontWeight": "400",
-      "color": "#222222",
-      "textTransform": "none",
-      "letterSpacing": "0em",
-      "lineHeight": 1.55,
-      "textAlign": "left",
-      "borderBottom": "none"
-    }},
-    "body": {{
-      "fontFamily": "Georgia, 'Times New Roman', serif",
-      "fontSize": 10.5,
-      "fontWeight": "400",
-      "color": "#222222",
-      "textTransform": "none",
-      "letterSpacing": "0em",
-      "lineHeight": 1.55,
-      "textAlign": "left",
-      "borderBottom": "none"
-    }},
-    "bullet": {{
-      "fontFamily": "Georgia, 'Times New Roman', serif",
-      "fontSize": 10.5,
-      "fontWeight": "400",
-      "color": "#222222",
-      "textTransform": "none",
-      "letterSpacing": "0em",
-      "lineHeight": 1.55,
-      "textAlign": "left",
-      "borderBottom": "none"
-    }}
-  }}
+  "sections": [
+    {{"id": "summary",        "label": "Summary",        "enabled": true}},
+    {{"id": "experience",     "label": "Experience",     "enabled": true}},
+    {{"id": "education",      "label": "Education",      "enabled": true}},
+    {{"id": "skills",         "label": "Skills",         "enabled": true}},
+    {{"id": "projects",       "label": "Projects",       "enabled": false}},
+    {{"id": "certifications", "label": "Certifications", "enabled": false}},
+    {{"id": "awards",         "label": "Awards",         "enabled": false}},
+    {{"id": "volunteer",      "label": "Volunteer",      "enabled": false}}
+  ]
 }}
 
 INSTRUCTIONS:
-- Infer font choices from the content style (professional/conservative → serif; modern/clean → sans-serif)
-- Infer section header capitalization style (ALL CAPS → textTransform: uppercase)
-- Infer whether dividers/lines appear under section headers
-- Set accentColor to the hex color that best matches divider/header accent colors you detect
-- Return sensible defaults for any property you cannot determine from the text
-- All fontSize values must be numbers (pt), all color values must be hex strings
-- fontWeight must be one of: "400", "500", "600", "700"
+- sections: list ALL eight section IDs above; set "enabled": true only for sections that actually
+  appear in the resume text; preserve the order they appear (sections not found go at the bottom
+  with enabled: false)
+- label: use the exact heading text from the resume if it differs from the default (e.g. "Work
+  Experience" instead of "Experience"), otherwise keep the default
+- pageSize: "letter" for North American resumes, "A4" for others — infer from context
+- marginX / marginY: estimate in inches based on how much white space the layout appears to have
+  (typical range 0.5–1.25 in); default to 0.75 if uncertain
+- Do NOT return any typography or color fields — only the fields shown in the schema above
 """

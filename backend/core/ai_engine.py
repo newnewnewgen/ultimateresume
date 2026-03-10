@@ -591,169 +591,103 @@ def assemble_latex_resume(latex_template: str, resume_text: str, profile: dict) 
     return _call_gemini(prompt, max_output_tokens=8192, use_pro=True, thinking_budget=2048).strip()
 
 
-# ── Design extraction ─────────────────────────────────────────────────────────
+# ── Layout extraction (sections + margins only) ────────────────────────────────
 
-_DEFAULT_ELEMENT = {
-    "fontFamily":    "Georgia, 'Times New Roman', serif",
-    "fontSize":      10.5,
-    "fontWeight":    "400",
-    "color":         "#222222",
-    "textTransform": "none",
-    "letterSpacing": "0em",
-    "lineHeight":    1.55,
-    "textAlign":     "left",
-    "borderBottom":  "none",
+# Canonical section IDs and the keyword patterns that identify them in resume text
+_SECTION_PATTERNS: list[tuple[str, str, list[str]]] = [
+    # (id, default_label, [keyword patterns])
+    ("summary",        "Summary",        ["summary", "objective", "profile", "about"]),
+    ("experience",     "Experience",     ["experience", "employment", "work history", "career"]),
+    ("education",      "Education",      ["education", "academic", "schooling", "degree"]),
+    ("skills",         "Skills",         ["skill", "technical", "competenc", "proficienc", "expertise"]),
+    ("projects",       "Projects",       ["project", "portfolio", "work sample"]),
+    ("certifications", "Certifications", ["certif", "licens", "credential", "accreditation"]),
+    ("awards",         "Awards",         ["award", "honor", "achiev", "recogn", "distinction"]),
+    ("volunteer",      "Volunteer",      ["volunteer", "community", "nonprofit", "charity", "civic"]),
+]
+
+_DEFAULT_LAYOUT: dict = {
+    "pageSize": "letter",
+    "marginX":  0.75,
+    "marginY":  0.75,
+    "sections": [
+        {"id": sid, "label": label, "enabled": False}
+        for sid, label, _ in _SECTION_PATTERNS
+    ],
 }
 
-_DEFAULT_DESIGN: dict = {
-    "pages":        1,
-    "pageSize":     "letter",
-    "marginX":      1.0,
-    "marginY":      0.75,
-    "accentColor":  "#bbbbbb",
-    "showDividers": True,
-    "elements": {
-        "nameContact":     {**_DEFAULT_ELEMENT, "fontSize": 16, "fontWeight": "700", "color": "#111111", "textAlign": "center", "lineHeight": 1.3},
-        "sectionHeader":   {**_DEFAULT_ELEMENT, "fontFamily": "Arial, Helvetica, sans-serif", "fontSize": 9, "fontWeight": "700", "color": "#111111", "textTransform": "uppercase", "letterSpacing": "0.1em", "lineHeight": 1.4, "borderBottom": "1px solid #bbbbbb"},
-        "roleHeader":      {**_DEFAULT_ELEMENT, "fontWeight": "600", "color": "#111111"},
-        "educationHeader": {**_DEFAULT_ELEMENT, "fontWeight": "600", "color": "#111111"},
-        "projectHeader":   {**_DEFAULT_ELEMENT, "fontWeight": "600", "color": "#111111"},
-        "volunteerHeader": {**_DEFAULT_ELEMENT, "fontWeight": "600", "color": "#111111"},
-        "skillsBlock":     {**_DEFAULT_ELEMENT},
-        "body":            {**_DEFAULT_ELEMENT},
-        "bullet":          {**_DEFAULT_ELEMENT},
-    },
-}
+
+def _detect_sections_from_text(text: str) -> list[dict]:
+    """Scan plain text for section headings; return ordered list of SectionDef dicts."""
+    lines = text.splitlines()
+    found: list[tuple[int, str, str]] = []  # (line_index, id, label_as_found)
+    seen_ids: set[str] = set()
+
+    for i, raw in enumerate(lines):
+        line = raw.strip()
+        if not line or len(line) > 60:
+            continue
+        line_lc = line.lower()
+        for sid, default_label, patterns in _SECTION_PATTERNS:
+            if sid in seen_ids:
+                continue
+            if any(pat in line_lc for pat in patterns):
+                found.append((i, sid, line.title()))
+                seen_ids.add(sid)
+                break
+
+    # Build result: found sections first (in order), then missing sections disabled
+    result = [{"id": sid, "label": label, "enabled": True} for _, sid, label in sorted(found)]
+    for sid, default_label, _ in _SECTION_PATTERNS:
+        if sid not in seen_ids:
+            result.append({"id": sid, "label": default_label, "enabled": False})
+    return result
 
 
 def extract_design_from_docx(file_bytes: bytes) -> dict:
-    """Extract resume design settings from a DOCX file using python-docx.
+    """Extract page layout (sections + margins) from a DOCX file.
 
-    Reads paragraph styles, font properties, and page margins to build a
-    ResumeDesign-compatible dict. Falls back to defaults where data is missing.
+    Returns a partial ResumeDesign dict with only: pageSize, marginX, marginY, sections.
+    Typography is intentionally excluded — the user's selected template is preserved.
     """
     import io
     from docx import Document
-    from docx.shared import Pt, Inches
 
-    doc = Document(io.BytesIO(file_bytes))
-    design = json.loads(json.dumps(_DEFAULT_DESIGN))  # deep copy
+    layout = {
+        "pageSize": "letter",
+        "marginX":  0.75,
+        "marginY":  0.75,
+    }
 
-    # ── Page margins ──────────────────────────────────────────────────────────
     try:
-        section = doc.sections[0]
-        left_in  = section.left_margin.inches  if section.left_margin  else 1.0
-        right_in = section.right_margin.inches if section.right_margin else 1.0
-        top_in   = section.top_margin.inches   if section.top_margin   else 0.75
-        design["marginX"] = round((left_in + right_in) / 2, 2)
-        design["marginY"] = round(top_in, 2)
-    except Exception:
-        pass
+        doc = Document(io.BytesIO(file_bytes))
 
-    # ── Walk styles for named heading styles ──────────────────────────────────
-    def _font_family(font) -> str | None:
-        name = getattr(font, "name", None)
-        if not name:
-            return None
-        name_lc = name.lower()
-        if any(s in name_lc for s in ("georgia", "times", "garamond", "palatino", "cambria")):
-            return f"{name}, serif"
-        if any(s in name_lc for s in ("arial", "helvetica", "calibri", "trebuchet", "verdana", "tahoma")):
-            return f"{name}, sans-serif"
-        if any(s in name_lc for s in ("courier", "consolas", "mono")):
-            return f"{name}, monospace"
-        return f"{name}, serif"
-
-    def _font_size_pt(font) -> float | None:
-        sz = getattr(font, "size", None)
-        if sz is None:
-            return None
+        # ── Page margins ──────────────────────────────────────────────────────
         try:
-            return round(sz.pt, 1)
+            sec = doc.sections[0]
+            left_in  = sec.left_margin.inches  if sec.left_margin  else 0.75
+            right_in = sec.right_margin.inches if sec.right_margin else 0.75
+            top_in   = sec.top_margin.inches   if sec.top_margin   else 0.75
+            layout["marginX"] = round((left_in + right_in) / 2, 2)
+            layout["marginY"] = round(top_in, 2)
         except Exception:
-            return None
+            pass
 
-    def _font_weight(font) -> str | None:
-        bold = getattr(font, "bold", None)
-        if bold is True:
-            return "700"
-        if bold is False:
-            return "400"
-        return None
+        # ── Section detection ─────────────────────────────────────────────────
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        layout["sections"] = _detect_sections_from_text(full_text)
 
-    def _color_hex(font) -> str | None:
-        try:
-            rgb = font.color.rgb
-            return f"#{rgb}"
-        except Exception:
-            return None
-
-    def _apply(target: dict, font) -> None:
-        ff = _font_family(font)
-        if ff:
-            target["fontFamily"] = ff
-        fs = _font_size_pt(font)
-        if fs:
-            target["fontSize"] = fs
-        fw = _font_weight(font)
-        if fw:
-            target["fontWeight"] = fw
-        fc = _color_hex(font)
-        if fc and fc.lower() not in ("#000000", "#auto", "#none"):
-            target["color"] = fc
-
-    # Try to read from the document's named styles
-    try:
-        styles = doc.styles
-        for style in styles:
-            name_lc = (style.name or "").lower()
-            font = style.font
-            if "heading 1" in name_lc or "title" in name_lc:
-                _apply(design["elements"]["nameContact"], font)
-            elif "heading 2" in name_lc:
-                _apply(design["elements"]["sectionHeader"], font)
-                sz = _font_size_pt(font)
-                if sz and sz > 0:
-                    cap = getattr(font, "all_caps", None)
-                    if cap:
-                        design["elements"]["sectionHeader"]["textTransform"] = "uppercase"
-            elif "heading 3" in name_lc:
-                for key in ("roleHeader", "educationHeader", "projectHeader", "volunteerHeader"):
-                    _apply(design["elements"][key], font)
-            elif name_lc in ("normal", "default paragraph font", "body text"):
-                for key in ("body", "bullet", "skillsBlock"):
-                    _apply(design["elements"][key], font)
     except Exception:
-        pass
+        layout["sections"] = _DEFAULT_LAYOUT["sections"]
 
-    # Walk actual paragraphs to refine guesses from real content
-    try:
-        for para in doc.paragraphs[:50]:  # limit to first 50 paragraphs
-            if not para.runs:
-                continue
-            run = para.runs[0]
-            text = para.text.strip()
-            if not text:
-                continue
-            # Heuristic: ALL CAPS short text → likely section header
-            if text == text.upper() and 3 < len(text) < 40 and not any(c.isdigit() for c in text):
-                _apply(design["elements"]["sectionHeader"], run.font)
-                if run.font.all_caps or text == text.upper():
-                    design["elements"]["sectionHeader"]["textTransform"] = "uppercase"
-            # Heuristic: large first paragraph → likely name
-            elif para == doc.paragraphs[0] and _font_size_pt(run.font) and _font_size_pt(run.font) > 12:
-                _apply(design["elements"]["nameContact"], run.font)
-                design["elements"]["nameContact"]["fontSize"] = _font_size_pt(run.font) or 16
-    except Exception:
-        pass
-
-    return design
+    return layout
 
 
 def extract_design_from_pdf(file_bytes: bytes) -> dict:
-    """Infer resume design settings from a PDF by extracting text and using AI.
+    """Extract page layout (sections + margins) from a PDF using AI.
 
-    Falls back to defaults if extraction fails.
+    Returns a partial ResumeDesign dict with only: pageSize, marginX, marginY, sections.
+    Typography is intentionally excluded — the user's selected template is preserved.
     """
     resume_text = ""
 
@@ -777,23 +711,28 @@ def extract_design_from_pdf(file_bytes: bytes) -> dict:
         except Exception:
             pass
 
+    # If text extraction failed entirely, fall back to heuristic detection on empty text
     if not resume_text.strip():
-        return json.loads(json.dumps(_DEFAULT_DESIGN))
+        return dict(_DEFAULT_LAYOUT)
 
+    # Try AI extraction first
     prompt = PARSE_RESUME_DESIGN.format(resume_text=resume_text[:6000])
     try:
-        result = _call_gemini(prompt, max_output_tokens=4096, json_mode=True)
+        result = _call_gemini(prompt, max_output_tokens=1024, json_mode=True)
         cleaned = result.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         parsed = json.loads(cleaned)
-        # Merge with defaults to fill any missing keys
-        design = json.loads(json.dumps(_DEFAULT_DESIGN))
-        for k, v in parsed.items():
-            if k == "elements" and isinstance(v, dict):
-                for ek, ev in v.items():
-                    if ek in design["elements"] and isinstance(ev, dict):
-                        design["elements"][ek].update(ev)
-            else:
-                design[k] = v
-        return design
+        # Validate and return only the layout fields
+        return {
+            "pageSize": parsed.get("pageSize", "letter"),
+            "marginX":  float(parsed.get("marginX", 0.75)),
+            "marginY":  float(parsed.get("marginY", 0.75)),
+            "sections": parsed.get("sections") or _detect_sections_from_text(resume_text),
+        }
     except Exception:
-        return json.loads(json.dumps(_DEFAULT_DESIGN))
+        # AI failed — fall back to heuristic section detection
+        return {
+            "pageSize": "letter",
+            "marginX":  0.75,
+            "marginY":  0.75,
+            "sections": _detect_sections_from_text(resume_text),
+        }
