@@ -109,7 +109,7 @@ function SessionCard({ session }: { session: Session }) {
   const title = session.title || "Untitled session";
 
   return (
-    <Link href={`/sessions/${session.id}`} className="group flex flex-col cursor-pointer">
+    <Link href={`/maker/${session.id}`} className="group flex flex-col cursor-pointer">
       {/* Thumbnail */}
       <div className="rounded-lg border border-zinc-200 overflow-hidden shadow-sm group-hover:shadow-md group-hover:border-zinc-300 transition-all">
         {hasOutput

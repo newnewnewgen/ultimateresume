@@ -441,7 +441,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
           <p className={`text-sm ${activities.length === 0 ? "text-red-500" : "text-zinc-500"}`}>
             {activities.length === 0
-              ? <>⚠ Activity bank is empty. <a href="/activities" className="underline">Add entries</a> first.</>
+              ? <>⚠ Activity bank is empty. <a href="/my-info" className="underline">Add entries</a> first.</>
               : `✓ ${activities.length} activities in your bank`}
           </p>
 

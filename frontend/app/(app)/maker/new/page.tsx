@@ -31,8 +31,8 @@ export default async function NewSessionPage() {
       .select("id")
       .single();
 
-    if (error) redirect(`/sessions/new?error=${encodeURIComponent(error.message)}`);
-    redirect(`/sessions/${data.id}`);
+    if (error) redirect(`/maker/new?error=${encodeURIComponent(error.message)}`);
+    redirect(`/maker/${data.id}`);
   }
 
   return (
@@ -45,7 +45,7 @@ export default async function NewSessionPage() {
           ← Back to dashboard
         </Link>
         <h1 className="text-2xl font-semibold text-zinc-900 mt-4">
-          New resume session
+          New maker
         </h1>
         <p className="text-zinc-500 text-sm mt-1">
           Paste the job description you&apos;re applying to.
@@ -58,7 +58,7 @@ export default async function NewSessionPage() {
             className="block text-sm font-medium text-zinc-700 mb-1.5"
             htmlFor="title"
           >
-            Session label{" "}
+            Maker label{" "}
             <span className="text-zinc-400 font-normal">(optional)</span>
           </label>
           <input
@@ -92,7 +92,7 @@ export default async function NewSessionPage() {
             type="submit"
             className="rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 transition-colors"
           >
-            Start session →
+            Start →
           </button>
           <Link
             href="/dashboard"

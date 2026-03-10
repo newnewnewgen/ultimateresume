@@ -18,25 +18,25 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect("/login");
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <nav className="relative bg-white border-b border-zinc-200 px-4 sm:px-6 h-14 flex items-center justify-between">
-        <div className="flex items-center gap-4 sm:gap-6">
-          <Link href="/dashboard" className="text-sm font-semibold text-zinc-900 tracking-tight hover:text-zinc-600 transition-colors">
-            AI Resume Writer
+    <div className="min-h-screen bg-[#FBFBFA]">
+      <nav className="relative bg-white border-b border-zinc-100 px-4 sm:px-6 h-14 flex items-center justify-between">
+        <div className="flex items-center gap-5 sm:gap-7">
+          <Link href="/dashboard" className="text-sm font-semibold text-zinc-900 tracking-tight hover:text-zinc-500 transition-colors">
+            Resume AI
           </Link>
-          <div className="hidden sm:flex items-center gap-1">
-            <Link href="/sessions" className="rounded-md px-3 py-1.5 text-sm text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
-              Sessions
+          <div className="hidden sm:flex items-center gap-0.5">
+            <Link href="/maker" className="rounded-md px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
+              Maker
             </Link>
-            <Link href="/activities" className="rounded-md px-3 py-1.5 text-sm text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
-              Activities
+            <Link href="/my-info" className="rounded-md px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
+              My Info
             </Link>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="hidden sm:block text-sm text-zinc-400">{user.email}</span>
+        <div className="flex items-center gap-4">
+          <span className="hidden sm:block text-xs text-zinc-400">{user.email}</span>
           <form action={signOut}>
-            <button type="submit" className="text-sm text-zinc-600 hover:text-zinc-900 transition-colors">
+            <button type="submit" className="text-sm text-zinc-500 hover:text-zinc-900 transition-colors">
               Sign out
             </button>
           </form>

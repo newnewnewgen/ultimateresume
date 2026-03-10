@@ -114,7 +114,7 @@ export default function WelcomeBox({ firstName }: { firstName?: string }) {
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       const parsed = await res.json();
       sessionStorage.setItem("pendingResumeData", JSON.stringify(parsed));
-      router.push("/activities");
+      router.push("/my-info");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
       setUploading(false);
@@ -123,12 +123,12 @@ export default function WelcomeBox({ firstName }: { firstName?: string }) {
 
   function tryJake() {
     sessionStorage.setItem("pendingResumeData", JSON.stringify(JAKE_DATA));
-    router.push("/activities");
+    router.push("/my-info");
   }
 
   function goManual() {
     sessionStorage.setItem("setupMode", "manual");
-    router.push("/activities");
+    router.push("/my-info");
   }
 
   return (

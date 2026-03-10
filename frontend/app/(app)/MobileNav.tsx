@@ -5,8 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/sessions",   label: "Sessions" },
-  { href: "/activities", label: "Activities" },
+  { href: "/maker",   label: "Maker" },
+  { href: "/my-info", label: "My Info" },
 ];
 
 export default function MobileNav() {
@@ -17,7 +17,7 @@ export default function MobileNav() {
     <div className="sm:hidden">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="p-2 rounded-md text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 transition-colors"
+        className="p-2 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors"
         aria-label="Toggle menu"
       >
         {open ? (
@@ -32,7 +32,7 @@ export default function MobileNav() {
       </button>
 
       {open && (
-        <div className="absolute top-14 left-0 right-0 bg-white border-b border-zinc-200 shadow-sm z-50 px-4 py-3 flex flex-col gap-1">
+        <div className="absolute top-14 left-0 right-0 bg-white border-b border-zinc-100 shadow-sm z-50 px-4 py-3 flex flex-col gap-1">
           {LINKS.map((link) => (
             <Link
               key={link.href}

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import WelcomeBox from "./WelcomeBox";
 import RecentSessions from "./RecentSessions";
+import DashboardGreeting from "./DashboardGreeting";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -27,46 +28,38 @@ export default async function DashboardPage() {
     ]);
 
   const firstName = profile?.name?.split(" ")[0];
-  // Show welcome box when profile is not set up OR activity bank is empty
   const isNew = !profile?.name || (activityCount ?? 0) === 0;
 
   return (
     <div className="flex flex-col gap-10">
 
-      {/* Greeting */}
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-900">
-          {profile?.name ? "Welcome back, " + firstName : "Dashboard"}
-        </h1>
-        <p className="text-zinc-500 mt-1 text-sm">
-          AI-powered resume tailoring, from your activity bank to the final document.
-        </p>
-      </div>
+      {/* Animated greeting */}
+      <DashboardGreeting name={firstName} />
 
       {/* Welcome box — shown when profile not set up or activity bank empty */}
       {isNew && <WelcomeBox firstName={firstName} />}
 
       {/* ── Start new section ── */}
       <section>
-        <h2 className="text-sm font-semibold text-zinc-700 mb-4">Start new</h2>
+        <h2 className="text-sm font-semibold text-zinc-700 mb-4">New maker</h2>
         <div className="flex gap-4 flex-wrap">
 
           {/* Blank */}
-          <Link href="/sessions/new" className="group flex flex-col w-32 cursor-pointer">
-            <div className="rounded-lg border-2 border-dashed border-zinc-300 overflow-hidden flex items-center justify-center hover:border-zinc-400 hover:bg-zinc-50 transition-all" style={{ aspectRatio: "8.5 / 11" }}>
-              <div className="flex flex-col items-center gap-1.5 text-zinc-400 group-hover:text-zinc-600 transition-colors">
+          <Link href="/maker/new" className="group flex flex-col w-32 cursor-pointer">
+            <div className="rounded-lg border-2 border-dashed border-zinc-200 overflow-hidden flex items-center justify-center hover:border-zinc-400 hover:bg-zinc-50 transition-all" style={{ aspectRatio: "8.5 / 11" }}>
+              <div className="flex flex-col items-center gap-1.5 text-zinc-300 group-hover:text-zinc-600 transition-colors">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
                 </svg>
                 <span className="text-xs font-medium">Blank</span>
               </div>
             </div>
-            <p className="mt-2 text-xs text-zinc-600 font-medium text-center">Blank session</p>
+            <p className="mt-2 text-xs text-zinc-600 font-medium text-center">Blank</p>
           </Link>
 
           {/* Template placeholders */}
           {["Modern", "Classic", "Executive"].map((name) => (
-            <div key={name} className="flex flex-col w-32 opacity-50 cursor-not-allowed">
+            <div key={name} className="flex flex-col w-32 opacity-40 cursor-not-allowed">
               <div className="rounded-lg border border-zinc-200 bg-zinc-50 overflow-hidden flex flex-col" style={{ aspectRatio: "8.5 / 11" }}>
                 <div className="flex-1 px-2.5 pt-3 pb-1 flex flex-col gap-1">
                   <div className="h-1 w-3/4 rounded-sm bg-zinc-300 mb-1" />
@@ -91,7 +84,7 @@ export default async function DashboardPage() {
         </div>
       </section>
 
-      {/* ── Recent sessions ── */}
+      {/* ── Recent ── */}
       <RecentSessions sessions={sessions ?? []} />
 
     </div>
