@@ -645,8 +645,9 @@ Rules:
 """
 
 CREATE_KNOCKOUT_RUBRIC = """\
-You are a recruiter screening resumes. Identify the HARD KNOCKOUT requirements from this job
-description — requirements that screen candidates out immediately if not met.
+You are a recruiter screening resumes. Identify ONLY the binary pass/fail requirements from this
+job description — questions a recruiter would ask on a screening call that would end the call
+immediately if the answer is wrong.
 
 RAW JOB DESCRIPTION:
 ---
@@ -656,39 +657,67 @@ RAW JOB DESCRIPTION:
 PRE-EXTRACTED SKILLS (reference only):
   Required: {required_skills}
 
-Knockout requirements are typically:
-  - Minimum education level (e.g., "Bachelor's degree required", "MBA required")
-  - Required years of experience (e.g., "5+ years of X required", "minimum 3 years in Y")
-  - Required location or work authorization (e.g., "Must be authorized to work in US", "Must be in NYC")
-  - Specific required licenses or certifications (e.g., "CPA required", "active security clearance")
-  - Other absolute prerequisites explicitly marked as required
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VALID KNOCKOUT CATEGORIES (use ONLY these):
 
-Do NOT include:
-  - "Preferred" or "nice to have" qualifications
-  - Soft skills or personality traits
-  - General job duties or responsibilities
-  - Any requirement where the posting uses language like "preferred", "a plus", "ideally",
-    "experience with", "familiarity with", or "bonus"
-  - Start dates, availability windows, or timing requirements (e.g., "Must be able to start
-    in August 2025", "available to begin within 2 weeks", "immediate availability required")
-    → These are not profile-based and cannot be verified from a resume
-  - Willingness-to-travel, shift, or schedule preferences (e.g., "willing to work weekends",
-    "open to 25% travel") — assume the candidate is flexible
+  1. LEGAL / AUTHORIZATION
+     Explicit work authorization requirements.
+     Examples: "Must be authorized to work in the US without sponsorship",
+               "Active security clearance required", "Must reside in [City/State]"
+     → category: "location"
+
+  2. MINIMUM EXPERIENCE (years in a specific, named skill or domain)
+     Only include if the posting states a SPECIFIC number of years as a hard requirement.
+     Examples: "Minimum 3 years of SQL experience required",
+               "5+ years in B2B SaaS product management required"
+     → category: "experience"
+
+  3. ESSENTIAL HARD SKILLS / TOOLS (non-negotiable, explicitly mandatory)
+     Only concrete, named technical tools, languages, platforms, or systems.
+     Must be clearly stated as required — not preferred.
+     Examples: "Must have hands-on Python experience", "Salesforce CRM required"
+     → category: "certification"
+
+  4. MANDATORY DEGREES / LICENSES
+     Formal credentials legally required or explicitly non-negotiable for the role.
+     Examples: "RN license required", "CPA required", "Active bar membership"
+     A generic "bachelor's degree required" counts ONLY if stated as an absolute gate.
+     → category: "education"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HARD EXCLUSIONS — do NOT include any of these:
+
+  ✗ Soft skills, passion, traits, or culture-fit language:
+      "passion for technology", "collaborative mindset", "entrepreneurial spirit",
+      "demonstrated ability to", "strong communication skills", "customer empathy"
+  ✗ Vague or subjective requirements:
+      "deep understanding of", "familiarity with", "experience preferred",
+      "ability to come up with solutions", "background in"
+  ✗ "Preferred", "nice to have", "a plus", "ideally", "bonus" qualifications
+  ✗ General job duties or responsibilities
+  ✗ Start dates, availability windows, schedule or travel preferences
+  ✗ Anything that cannot be verified with a yes/no answer from a resume
+
+HARD REJECT TEST — before including any item, ask:
+  (1) Is this stated explicitly as REQUIRED (not preferred)?
+  (2) Would a recruiter reject the candidate on a screening call if the answer is no?
+  (3) Is it objective and verifiable (not a soft skill or subjective trait)?
+  If any answer is NO → exclude it.
 
 Return EXACTLY this JSON format (no extra text):
 {{
   "knockout_items": [
     {{
       "item_id": "KO-001",
-      "category": "education|experience|location|certification|other",
-      "requirement": "Clear, direct statement of the hard requirement"
+      "category": "education|experience|location|certification",
+      "requirement": "Clear, direct yes/no statement of the hard requirement"
     }},
     ...
   ]
 }}
 
 If there are no clear knockout requirements, return {{"knockout_items": []}}.
-Aim for 2–6 items. Only include true hard gates — when in doubt, leave it out.
+Aim for 0–4 items. Only true binary gates — when in doubt, leave it out.
 """
 
 PARSE_RESUME_DESIGN = """\
