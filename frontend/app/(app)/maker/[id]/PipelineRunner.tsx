@@ -768,7 +768,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
             selections={selections}
             generatedBullets={generatedBullets}
             generatingCount={generatingCount}
-            buildDisabled={readyCount === 0 || generatingCount > 0}
+            buildDisabled={readyCount === 0}
             onActivityToggle={handleActivityToggle}
             onCustomBullet={handleCustomBullet}
             onBuild={runAssemblyFromBullets}
