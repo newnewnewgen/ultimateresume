@@ -16,6 +16,7 @@ from core.models import (
     CleanedJobDescription,
     IntentRubric,
     IntentRubricItem,
+    KnockoutItem,
 )
 from prompts.templates import (
     ASSEMBLE_RESUME,
@@ -23,6 +24,7 @@ from prompts.templates import (
     CLEAN_JOB_DESCRIPTION,
     CREATE_ATS_RUBRIC,
     CREATE_INTENT_RUBRIC,
+    CREATE_KNOCKOUT_RUBRIC,
     DEDUP_BULLETS,
     EDIT_LATEX_TEMPLATE,
     EXTRACT_ACTIVITY_SKILLS,
@@ -301,6 +303,50 @@ def create_intent_rubric(cleaned_jd: CleanedJobDescription) -> IntentRubric:
     )
 
 
+def create_knockout_rubric(cleaned_jd: CleanedJobDescription) -> list[KnockoutItem]:
+    """Use AI to identify hard knockout requirements from the JD."""
+    prompt = CREATE_KNOCKOUT_RUBRIC.format(
+        job_description_raw=cleaned_jd.raw_text or "(not provided)",
+        required_skills=json.dumps(cleaned_jd.required_skills),
+    )
+    response = _call_gemini(prompt, max_output_tokens=2048, json_mode=True)
+    data = _extract_json(response)
+
+    items = []
+    for raw in data.get("knockout_items", []):
+        items.append(
+            KnockoutItem(
+                item_id=raw.get("item_id", ""),
+                category=raw.get("category", "other"),
+                requirement=raw.get("requirement", ""),
+            )
+        )
+    return items
+
+
+def generate_single_bullet(
+    rubric_item: ATSRubricItem,
+    activity: "ActivityBullet",
+) -> str:
+    """Generate a single resume bullet using Pro Gemini for higher quality inline generation."""
+    prompt = WRITE_STI_STATEMENT.format(
+        rubric_item=rubric_item.item,
+        ats_keywords=", ".join(rubric_item.ats_keywords) if rubric_item.ats_keywords else rubric_item.item,
+        situation_desc=rubric_item.situation_description,
+        action_desc=rubric_item.action_description,
+        secondary_rubric_context="",
+        holistic_person="Not provided",
+        original_situation=activity.situation,
+        original_action=activity.action,
+        original_impact=activity.impact,
+        job_title=activity.job_title,
+        company=activity.company,
+        extracted_skills=", ".join(activity.extracted_skills) if activity.extracted_skills else "Not available",
+    )
+    text, _ = _call_gemini_with_thinking(prompt, max_output_tokens=2048, use_pro=True, thinking_budget=512)
+    return text.strip()
+
+
 def write_sti_statement(
     rubric_item: ATSRubricItem,
     activity: "ActivityBullet",
@@ -388,24 +434,42 @@ def assemble_resume(
     """Use AI to assemble S-T-I statements into a structured resume."""
     from collections import defaultdict
 
-    # Pre-group bullets by role so the AI cannot misattribute them
-    role_order: list[tuple] = []
-    role_bullets: dict[tuple, list[str]] = defaultdict(list)
-    for s in statements:
-        key = (s["job_title"], s["company"], s.get("dates", ""), s.get("location", ""))
-        if key not in role_bullets:
-            role_order.append(key)
-        role_bullets[key].append(s["statement"])
+    PROJECT_TYPES = {"project", "competition"}
 
-    work_history_block = ""
-    for job_title, company, dates, location in role_order:
-        work_history_block += f"\n{job_title} | {company} | {dates} | {location}\n"
-        for bullet in role_bullets[(job_title, company, dates, location)]:
-            work_history_block += f"  • {bullet}\n"
+    # Separate work and project activities
+    work_stmts    = [s for s in statements if s.get("entry_type", "work") not in PROJECT_TYPES]
+    project_stmts = [s for s in statements if s.get("entry_type", "work") in PROJECT_TYPES]
 
-    # Skills: prefer consolidated from activities, fall back to profile skills
-    effective_skills = consolidated_skills or template.skills or []
-    skills_list = ", ".join(effective_skills) if effective_skills else "  Not available"
+    def _build_history_block(stmts: list[dict]) -> str:
+        role_order: list[tuple] = []
+        role_bullets: dict[tuple, list[str]] = defaultdict(list)
+        for s in stmts:
+            if not s.get("statement"):
+                continue
+            key = (s["job_title"], s["company"], s.get("dates", ""), s.get("location", ""))
+            if key not in role_bullets:
+                role_order.append(key)
+            role_bullets[key].append(s["statement"])
+        block = ""
+        for job_title, company, dates, location in role_order:
+            block += f"\n{job_title} | {company} | {dates} | {location}\n"
+            for bullet in role_bullets[(job_title, company, dates, location)]:
+                block += f"  • {bullet}\n"
+        return block.strip() or "  None"
+
+    work_history_block    = _build_history_block(work_stmts)
+    project_history_block = _build_history_block(project_stmts)
+
+    # Skills: deduplicate, then pass a capped list so the AI can pick the best ones
+    raw_skills = consolidated_skills or template.skills or []
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for s in raw_skills:
+        key = s.lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(s)
+    skills_list = ", ".join(deduped[:60]) if deduped else "  Not available"
 
     # Build education block
     education_block = "  Not provided"
@@ -439,8 +503,8 @@ def assemble_resume(
         website=template.website,
         sections=", ".join(template.sections),
         work_history_block=work_history_block,
+        project_history_block=project_history_block,
         role_context=role_context or "Not provided",
-        holistic_person=holistic_person or "Not provided",
         skills_list=skills_list,
         education_block=education_block,
         awards_list=awards_list,

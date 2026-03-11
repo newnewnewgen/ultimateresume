@@ -188,6 +188,14 @@ class GeneratedResume:
 
 
 @dataclass
+class KnockoutItem:
+    """A hard knockout requirement from the job description."""
+    item_id: str = ""
+    category: str = "other"  # education, experience, location, certification, other
+    requirement: str = ""
+
+
+@dataclass
 class PipelineState:
     """Full state of the resume generation pipeline."""
 

@@ -79,11 +79,25 @@ export interface Statement {
   company: string;
   dates: string;
   location: string;
+  entry_type?: string;
   rubric_ids: string[];
   rubric_items: string[];
   primary_rubric_id: string;
   primary_rubric_item: string;
   rewrite_logic: string;
+}
+
+export interface KnockoutItem {
+  item_id: string;
+  category: string;
+  requirement: string;
+}
+
+export interface GeneratedBullet {
+  statement: string;
+  generating: boolean;
+  error?: string;
+  rubricId: string;
 }
 
 export interface ResumeTemplate {

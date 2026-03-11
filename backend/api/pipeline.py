@@ -11,6 +11,7 @@ from core.models import (
     CleanedJobDescription,
     IntentRubric,
     IntentRubricItem,
+    KnockoutItem,
     ResumeTemplate,
 )
 from core.pipeline import (
@@ -22,6 +23,7 @@ from core.pipeline import (
     step6_assemble_ats_resume,
     step7_intent_rewrite,
 )
+from core.ai_engine import generate_single_bullet
 
 router = APIRouter()
 
@@ -104,9 +106,16 @@ class Step3Request(BaseModel):
     job_description_raw: str = ""
 
 
+class KnockoutItemOut(BaseModel):
+    item_id: str
+    category: str
+    requirement: str
+
+
 class Step3Response(BaseModel):
     ats_rubric: list[ATSRubricItemOut]
     intent_rubric: IntentRubricOut
+    knockout_rubric: list[KnockoutItemOut] = []
 
 
 class VectorMatchOut(BaseModel):
@@ -141,6 +150,7 @@ class StatementOut(BaseModel):
     company: str
     dates: str
     location: str
+    entry_type: str = "work"
     rubric_ids: list[str]
     rubric_items: list[str]
     primary_rubric_id: str
@@ -303,7 +313,7 @@ async def step3(req: Step3Request):
             valued_qualities=req.valued_qualities,
             holistic_person_definition=req.holistic_person_definition,
         )
-        ats_rubric, intent_rubric = step3_create_rubrics(cleaned)
+        ats_rubric, intent_rubric, knockout_rubric = step3_create_rubrics(cleaned)
         return Step3Response(
             ats_rubric=[_ats_rubric_item_out(r) for r in ats_rubric],
             intent_rubric=IntentRubricOut(
@@ -318,6 +328,14 @@ async def step3(req: Step3Request):
                 ],
                 holistic_summary=intent_rubric.holistic_summary,
             ),
+            knockout_rubric=[
+                KnockoutItemOut(
+                    item_id=k.item_id,
+                    category=k.category,
+                    requirement=k.requirement,
+                )
+                for k in knockout_rubric
+            ],
         )
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
@@ -431,5 +449,26 @@ async def step7(req: Step7Request):
             ats_keywords=req.ats_keywords or None,
         )
         return Step7Response(final_resume=final, thinking=thinking)
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+class GenerateBulletRequest(BaseModel):
+    rubric_item: ATSRubricItemOut
+    activity: ActivityOut
+
+
+class GenerateBulletResponse(BaseModel):
+    statement: str
+
+
+@router.post("/generate-bullet", response_model=GenerateBulletResponse)
+async def generate_bullet(req: GenerateBulletRequest):
+    """Generate a single resume bullet using Pro Gemini for a matched activity/rubric pair."""
+    try:
+        rubric = _to_ats_rubric_item(req.rubric_item)
+        activity = _to_activity_bullet(req.activity)
+        statement = generate_single_bullet(rubric, activity)
+        return GenerateBulletResponse(statement=statement)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc

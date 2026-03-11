@@ -8,6 +8,7 @@ from core.models import (
     CleanedJobDescription,
     GeneratedResume,
     IntentRubric,
+    KnockoutItem,
     PipelineState,
     ResumeTemplate,
     VectorMatch,
@@ -23,6 +24,7 @@ from core.ai_engine import (
     clean_job_description,
     create_ats_rubric,
     create_intent_rubric,
+    create_knockout_rubric,
     dedup_bullets,
     extract_skills_from_activities,
     intent_rewrite,
@@ -49,11 +51,19 @@ def step2_analyze_job_description(raw_text: str) -> CleanedJobDescription:
 
 def step3_create_rubrics(
     cleaned_jd: CleanedJobDescription,
-) -> tuple[list[ATSRubricItem], IntentRubric]:
-    """Step 3: Create both ATS and Intent rubrics."""
-    ats = create_ats_rubric(cleaned_jd)
-    intent = create_intent_rubric(cleaned_jd)
-    return ats, intent
+) -> tuple[list[ATSRubricItem], IntentRubric, list[KnockoutItem]]:
+    """Step 3: Create ATS, Intent, and Knockout rubrics in parallel."""
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        ats_future      = executor.submit(create_ats_rubric, cleaned_jd)
+        intent_future   = executor.submit(create_intent_rubric, cleaned_jd)
+        knockout_future = executor.submit(create_knockout_rubric, cleaned_jd)
+        ats     = ats_future.result()
+        intent  = intent_future.result()
+        knockout = knockout_future.result()
+
+    return ats, intent, knockout
 
 
 def step4_vectorize_and_match(
@@ -161,6 +171,7 @@ def step5_generate_statements(
             "company": activity.company,
             "dates": activity.dates_worked,
             "location": activity.location,
+            "entry_type": activity.entry_type,
             "rubric_ids": [r.rubric_id for r in rubric_items],
             "rubric_items": [r.item for r in rubric_items],
             "primary_rubric_id": primary_rubric.rubric_id,
@@ -188,6 +199,7 @@ def step5_generate_statements(
                     "company": activity.company,
                     "dates": activity.dates_worked,
                     "location": activity.location,
+                    "entry_type": activity.entry_type,
                     "rubric_ids": [r.rubric_id for r in rubric_items],
                     "rubric_items": [r.item for r in rubric_items],
                     "primary_rubric_id": primary_rubric.rubric_id,

@@ -20,71 +20,101 @@ Distinguish clearly between hard requirements and nice-to-haves.
 """
 
 CREATE_ATS_RUBRIC = """\
-You are an expert ATS (Applicant Tracking System) analyst. Create a focused ATS scoring rubric
-from the job description below.
+You are an expert ATS (Applicant Tracking System) analyst. Create a focused, keyword-driven ATS
+scoring rubric from the job description below.
 
-RAW JOB DESCRIPTION (primary source of truth — use exact language and specific requirements from here):
+RAW JOB DESCRIPTION (primary source of truth):
 ---
 {job_description_raw}
 ---
 
-PRE-EXTRACTED SKILLS (use as a starting checklist, but derive specificity from the raw JD above):
+PRE-EXTRACTED SKILLS (starting checklist — derive specificity from the raw JD above):
   Required: {required_skills}
   Nice-to-have: {nice_to_have_skills}
   Valued qualities: {valued_qualities}
 
-CRITICAL RULES:
-1. Derive rubric items from the SPECIFIC requirements in the raw JD, not the pre-extracted summaries.
-   Use the exact behaviors, contexts, and outcomes the JD describes — not generic category names.
-   BAD item: "Product Management Experience"
-   GOOD item: "Cross-functional Roadmap Prioritization" (if the JD mentions roadmap ownership + stakeholder alignment)
-2. GROUP related skills into a SINGLE rubric item. For example:
-   - "Docker" and "Kubernetes" and "containerization" → ONE item: "Containerization (Docker, Kubernetes)"
-   - "Python" and "Go" and "Java" → ONE item: "Programming Languages (Python, Go, Java)"
-   - "CI/CD" and "DevOps" and "automated deployment" → ONE item: "CI/CD & DevOps Practices"
-3. Each rubric item must represent a DISTINCT skill area — no two items should match the same resume bullet.
-4. Assign a priority tier based on the JD's language:
-   - "critical": Explicitly required / "must have" — missing this likely means rejection
-   - "important": Strongly preferred or implied as necessary
-   - "nice_to_have": Bonus skills that differentiate candidates
-5. The "item" field should be specific and behavioral (what does success look like?).
-6. "ats_keywords" must contain TWO layers of terms — combine them into one flat list:
-   LAYER 1 — Exact JD terms: The specific words/phrases that appear in the job description.
-     Include every variant the JD uses (e.g. "product roadmap", "roadmap prioritization", "roadmapping").
-   LAYER 2 — Semantic variants: Common synonyms, adjacent concepts, and industry-standard alternatives
-     that a strong candidate would use in their resume even if those exact words aren't in the JD.
-     Think: what would an experienced practitioner write instead?
-     Examples:
-       - JD says "stakeholder alignment" → also add: "executive communication", "cross-functional collaboration",
-         "buy-in", "influence without authority", "stakeholder management"
-       - JD says "data-driven decisions" → also add: "analytics", "A/B testing", "metrics", "KPIs",
-         "quantitative analysis", "experimentation"
-       - JD says "Python" → also add: "pandas", "NumPy", "scripting", "automation", "data pipelines"
-       - JD says "agile" → also add: "scrum", "sprint planning", "kanban", "iterative development"
-     The goal: if a candidate demonstrably HAS this skill but uses different vocabulary, they still match.
-   Target 8-15 keywords per rubric item, mixing exact and semantic variants.
-7. situation_description: Frame it as the actual challenge the employer is hiring for (from the JD context).
-   action_description: Describe specific actions that demonstrate competency, using JD language plus
-   common practitioner language.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHAT BELONGS IN THIS RUBRIC (ATS = keyword matching):
+  ✓ Specific tools, platforms, languages, frameworks
+  ✓ Technical methodologies (CI/CD, TDD, microservices, agile, etc.)
+  ✓ Domain-specific practices (A/B testing, financial modeling, HIPAA compliance, etc.)
+  ✓ Concrete deliverables (API design, data pipelines, product roadmaps, etc.)
+  ✓ Measurable processes (query optimization, load testing, cost reduction, etc.)
+  ✓ Industry certifications, standards, or compliance frameworks (SOC 2, PMP, HIPAA, etc.)
+
+WHAT DOES NOT BELONG — HARD EXCLUSIONS:
+  ✗ Education requirements: "Bachelor's degree", "accredited university", "MBA", "B.S. in X"
+    → These go in the Knockout rubric, NOT here.
+  ✗ Years-of-experience thresholds: "1-3 years", "5+ years", "minimum X years of experience"
+    → These go in the Knockout rubric, NOT here.
+  ✗ Soft skills: creativity, adaptability, "innovative thinking", problem-solving mindset,
+    communication, collaboration, leadership presence, work ethic, passion, curiosity,
+    "ownership mindset", "growth mindset", "reinventing what is possible", "making an impact",
+    "thriving in ambiguity", "constantly evolving environment", "cross-functional teamwork"
+  ✗ Mission / culture / philosophy phrases: anything from a "we believe…" or "we value…"
+    company boilerplate section — these describe sentiment, not searchable skills
+  ✗ Anything vague enough that any resume would contain it (e.g., "problem solving", "results")
+  ✗ Any item where you cannot quote 2+ exact keyword strings directly from resume-bullet-style
+    text in the JD — if the JD only describes it in a "culture" or "about us" paragraph, skip it
+
+HARD REJECT TEST (apply to every item before including it):
+  1. Would this keyword appear in an actual resume bullet point (not in an education section
+     or tenure statement)? → If NO → do not include this item.
+  2. Can I quote at least 2 specific searchable strings verbatim from the JD for this item?
+     → If NO → do not include this item.
+  3. Is this a soft skill, culture phrase, education requirement, or years-of-experience threshold?
+     → If YES → do not include this item, period.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RULES:
+1. Every rubric item must pass all three HARD REJECT TESTS above before being included.
+   When in doubt, omit. A rubric with 8 tight items beats one with 14 that includes soft skills.
+2. Break broad categories into specific skills. Examples:
+   BAD:  "Product Management Experience (3+ years)"
+   GOOD: THREE separate items — "Product Roadmap & Prioritization", "User Story & Requirements Writing",
+         "Go-to-Market & Launch Execution" — each with its own tight keyword list.
+   BAD:  "Data Experience"
+   GOOD: "SQL & Relational Databases", "Data Pipeline Engineering (Spark, Airflow)", "BI & Analytics
+         Tooling (Tableau, Looker, dbt)" — depending on what the JD actually specifies.
+3. GROUP only when skills are truly synonymous or always co-occur:
+   - "Docker" + "Kubernetes" + "containerization" → ONE item
+   - "React" + "Vue" + "Angular" (JD lists alternatives) → ONE item
+   - Do NOT group unlike things just to reduce item count.
+4. Each item must represent a DISTINCT skill cluster — no two items should match the same resume bullet.
+5. Assign priority from JD language:
+   - "critical": explicitly required / must-have
+   - "important": strongly preferred or clearly implied
+   - "nice_to_have": bonus / differentiator
+6. "ats_keywords" — EXACT verbatim strings copied from the job posting ONLY.
+   Do NOT paraphrase. Do NOT add synonyms or practitioner variants. Do NOT add related tools
+   not mentioned in the posting. Copy the exact text the posting uses.
+   If the JD says "CI/CD", write "CI/CD" — not "continuous deployment" or "Jenkins".
+   If the JD says "React.js", write "React.js" — not "React" or "ReactJS".
+   Target 2–5 keywords per item.
+   KEYWORD BUDGET: The total ats_keywords count across ALL rubric items combined must be 25–35.
+   Budget accordingly — allocate more keywords to critical items, fewer to nice-to-have items.
+7. situation_description: the real business problem this skill solves, from JD context.
+   action_description: concrete practitioner actions that demonstrate this skill.
 
 Return EXACTLY this JSON format (no extra text):
 {{
   "rubric_items": [
     {{
       "rubric_id": "ATS-001",
-      "category": "technical_skill|soft_skill|domain_knowledge|tool_platform|methodology",
+      "category": "technical_skill|domain_knowledge|tool_platform|methodology",
       "priority": "critical|important|nice_to_have",
-      "item": "Specific, behavioral skill label derived from JD language",
-      "ats_keywords": ["exact JD term", "JD synonym", "semantic variant", "practitioner alternative", "..."],
-      "situation_description": "The actual challenge/context from the JD that requires this skill",
-      "action_description": "Specific actions that demonstrate this skill, using JD + practitioner language"
+      "item": "Specific, concrete skill cluster derived from JD (never a soft skill or broad bucket)",
+      "ats_keywords": ["exact JD term 1", "exact JD term 2", "exact JD term 3"],
+      "situation_description": "The concrete business challenge from the JD requiring this skill",
+      "action_description": "Specific practitioner actions that demonstrate competency"
     }},
     ...
   ]
 }}
 
-Aim for 8-15 DISTINCT rubric items. Fewer, well-grouped items are better than many overlapping ones.
-Each item should map to a different type of work experience that the JD is explicitly looking for.
+Aim for 8–14 DISTINCT items. Prefer specificity over breadth — it is better to have 10 tight
+items than 6 broad ones. Omit "soft_skill" from category entirely.
+Remember: 25–35 total keywords across ALL items. Quality over quantity.
 """
 
 CREATE_INTENT_RUBRIC = """\
@@ -150,8 +180,10 @@ Write a single resume bullet point. Rules:
    "Championed", "Harnessed", "Applied X principles to", or similar marketing language
 3. Do NOT reference credentials, degrees, or academic background as the source of the action
    (e.g., NEVER write "Leveraged a technical degree to..." or "Applied business strategy to...")
-4. Incorporate ATS keywords by weaving them into the description of real work —
-   do NOT lead with them or make the bullet sound keyword-engineered
+4. Inject ATS keywords by weaving them naturally into the bullet. Use the EXACT string
+   from the job posting — not synonyms, not abbreviations (unless the posting itself uses
+   them). 'Adobe Creative Cloud' and 'Adobe Creative Suite' are different strings to an
+   ATS parser. 'CI/CD' is not the same as 'continuous deployment'. Match the posting exactly.
 5. Use only the verified skills/technologies listed — do not invent tools or methods
    not present in the source activity
 6. Keep the core truth of the original activity — do NOT fabricate accomplishments
@@ -194,11 +226,8 @@ You are an expert resume formatter. Your job is to arrange pre-written content i
 complete, professional resume. You are a FORMATTER, not a writer — do not invent
 any new bullets, job titles, companies, or accomplishments.
 
-TARGET ROLE CONTEXT:
+TARGET ROLE CONTEXT (for skills ordering only):
   {role_context}
-
-IDEAL CANDIDATE PROFILE (use only for the summary section):
-  {holistic_person}
 
 TEMPLATE STRUCTURE:
   Name: {name}
@@ -229,18 +258,25 @@ bullets not listed here. Each role and its bullets are final.
 {work_history_block}
 ═══════════════════════════════════════════════════════════
 
+═══════════════════════════════════════════════════════════
+PRE-GROUPED PROJECT HISTORY — COPY THESE BULLETS VERBATIM
+Same rules: no rewrites, no additions.
+═══════════════════════════════════════════════════════════
+{project_history_block}
+═══════════════════════════════════════════════════════════
+
 FORMATTING RULES:
-1. Output the experience section using EXACTLY the roles and bullets above — no additions, no omissions, no rewording
-2. Order sections to match: {sections}
-3. Order jobs reverse-chronologically (most recent first)
-4. For the skills section, organize the skills into logical categories (Languages, Frameworks, Tools, Methodologies)
-5. Order skills to lead with those most relevant to the target role
-6. If the template includes a summary/objective section, write a concise 2-3 sentence professional summary using the target role context and ideal candidate profile above
-7. Do NOT fabricate any content outside of the summary — all experience bullets come from the pre-grouped block above
+1. Output the experience section using EXACTLY the roles and bullets from WORK HISTORY — no additions, no omissions, no rewording
+2. Output the projects section using EXACTLY the entries and bullets from PROJECT HISTORY — same rules
+3. Order sections to match: {sections}
+4. Order jobs/projects reverse-chronologically (most recent first)
+5. For the skills section: select the most relevant hard technical skills from CONSOLIDATED SKILLS; group into at most 4 categories (e.g. Languages, Frameworks, Tools, Cloud/Infra); include at most 6–8 skills per category; omit generic soft skills (communication, leadership, teamwork, etc.)
+6. Do NOT fabricate any content — all bullets come from the pre-grouped blocks above
+7. OMIT any section entirely (no header, no blank line) if it has no content to show
 
 Return the resume as clean, formatted plain text ready for a document.
 
-Use EXACTLY this structure — replace each [placeholder] with real content:
+Use EXACTLY this structure:
 
 {name}
 {location} | {email} | {phone}
@@ -248,16 +284,16 @@ Use EXACTLY this structure — replace each [placeholder] with real content:
 
 For each section in [{sections}], output a section header in ALL CAPS followed by its content:
 
-- summary → Write a 2-3 sentence professional summary using the role context and ideal candidate profile.
-- experience → Copy EVERY role and bullet from the PRE-GROUPED WORK HISTORY block above, verbatim. Do not skip any bullet. Do not reword. Paste them exactly.
-- education → Output the section header in ALL CAPS, then format and output every entry from the EDUCATION DATA block above (school, degree, field, dates, GPA if present, description/bullets if present). If EDUCATION DATA is empty, output the header and leave it blank.
-- projects → Output the section header. Leave the content blank (the user will fill it in).
-- skills → Organize all skills from CONSOLIDATED SKILLS into logical categories (Languages, Frameworks, Tools, Methodologies). Order by relevance to the target role. If CONSOLIDATED SKILLS is empty, output the header and leave it blank.
-- awards → If AWARDS is non-empty, output the section header in ALL CAPS and list each award. Otherwise skip this section.
-- certifications → If CERTIFICATIONS is non-empty, output the section header in ALL CAPS and list each certification. Otherwise skip this section.
-- For any other section → Output the section header and leave the content blank.
+- summary → OMIT entirely. Do not write a summary under any circumstances.
+- experience → Copy EVERY role and bullet from the PRE-GROUPED WORK HISTORY block, verbatim. If WORK HISTORY is "None", OMIT this section.
+- projects → Copy EVERY project and bullet from the PRE-GROUPED PROJECT HISTORY block, verbatim. If PROJECT HISTORY is "None", OMIT this section entirely (no header).
+- education → Format and output every entry from EDUCATION DATA. If empty, OMIT this section.
+- skills → Organize the most relevant hard skills from CONSOLIDATED SKILLS (max 4 categories, max 6–8 per category). If empty, OMIT this section.
+- awards → List each award from AWARDS. If "None", OMIT this section.
+- certifications → List each certification from CERTIFICATIONS. If "None", OMIT this section.
+- For any other section → OMIT (output nothing).
 
-CRITICAL: The experience section MUST contain all the role headers and bullet points from the PRE-GROUPED WORK HISTORY block. Do not output an empty experience section.
+CRITICAL: The experience section MUST contain all role headers and bullets from the PRE-GROUPED WORK HISTORY block. Do not output an empty experience section.
 """
 
 INTENT_REWRITE = """\
@@ -288,8 +324,7 @@ EDITING RULES — READ CAREFULLY:
    culture of...", "championed a vision of...") unless the original explicitly says so.
 6. For missing ATS keywords that genuinely aren't covered: insert them naturally into an
    existing bullet where they fit — do not create new bullets or rewrite entire sections.
-7. The summary section may be lightly reworded for narrative cohesion, but keep it concise.
-8. Preserve the candidate's natural voice. The output should read like the same person wrote it.
+7. Preserve the candidate's natural voice. The output should read like the same person wrote it.
 9. If a bullet is already well-aligned, copy it VERBATIM. Most bullets should be unchanged.
 
 Return the COMPLETE resume as formatted plain text, with only the minimal edits applied.
@@ -607,6 +642,48 @@ Rules:
 - Infer entry_type from context (internship → "work", side project → "project", etc.).
 - extracted_skills: 3–10 specific skills, tools, or technologies per entry.
 - Write situation/action/impact as polished resume-style prose (past tense, active voice).
+"""
+
+CREATE_KNOCKOUT_RUBRIC = """\
+You are a recruiter screening resumes. Identify the HARD KNOCKOUT requirements from this job
+description — requirements that screen candidates out immediately if not met.
+
+RAW JOB DESCRIPTION:
+---
+{job_description_raw}
+---
+
+PRE-EXTRACTED SKILLS (reference only):
+  Required: {required_skills}
+
+Knockout requirements are typically:
+  - Minimum education level (e.g., "Bachelor's degree required", "MBA required")
+  - Required years of experience (e.g., "5+ years of X required", "minimum 3 years in Y")
+  - Required location or work authorization (e.g., "Must be authorized to work in US", "Must be in NYC")
+  - Specific required licenses or certifications (e.g., "CPA required", "active security clearance")
+  - Other absolute prerequisites explicitly marked as required
+
+Do NOT include:
+  - "Preferred" or "nice to have" qualifications
+  - Soft skills or personality traits
+  - General job duties or responsibilities
+  - Any requirement where the posting uses language like "preferred", "a plus", "ideally",
+    "experience with", "familiarity with", or "bonus"
+
+Return EXACTLY this JSON format (no extra text):
+{{
+  "knockout_items": [
+    {{
+      "item_id": "KO-001",
+      "category": "education|experience|location|certification|other",
+      "requirement": "Clear, direct statement of the hard requirement"
+    }},
+    ...
+  ]
+}}
+
+If there are no clear knockout requirements, return {{"knockout_items": []}}.
+Aim for 2–6 items. Only include true hard gates — when in doubt, leave it out.
 """
 
 PARSE_RESUME_DESIGN = """\

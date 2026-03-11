@@ -3,13 +3,14 @@
 import { useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import MatchReview from "./MatchReview";
-import RubricEditor from "./RubricEditor";
-import BulletEditor from "./BulletEditor";
-import ResumeEditor, { htmlToResumeText } from "./ResumeEditor";
+import KnockoutCheck from "./KnockoutCheck";
+import ResumeEditor from "./ResumeEditor";
 import type {
   Activity,
   ATSRubricItem,
+  GeneratedBullet,
   IntentRubric,
+  KnockoutItem,
   Statement,
   VectorMatch,
 } from "@/lib/api/types";
@@ -17,11 +18,9 @@ import type {
 type Stage =
   | "idle"
   | "analyzing"
-  | "rubric-review"
+  | "knockout-check"
   | "matching"
   | "review"
-  | "generating"
-  | "bullet-review"
   | "assembling"
   | "done";
 
@@ -74,14 +73,11 @@ async function apiFetch<T>(path: string, body: unknown): Promise<T> {
 }
 
 const PIPELINE_STAGES: { label: string; stages: Stage[] }[] = [
-  { label: "Analyze",       stages: ["analyzing"] },
-  { label: "Rubric",        stages: ["rubric-review"] },
-  { label: "Match",         stages: ["matching"] },
-  { label: "Activities",    stages: ["review"] },
-  { label: "Generate",      stages: ["generating"] },
-  { label: "Bullets",       stages: ["bullet-review"] },
-  { label: "Assemble",      stages: ["assembling"] },
-  { label: "Done",          stages: ["done"] },
+  { label: "Analyze", stages: ["analyzing"] },
+  { label: "Screen",  stages: ["knockout-check"] },
+  { label: "Match",   stages: ["matching", "review"] },
+  { label: "Build",   stages: ["assembling"] },
+  { label: "Done",    stages: ["done"] },
 ];
 
 export default function PipelineRunner({ sessionId, session, activities, profile, education }: Props) {
@@ -94,31 +90,119 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     return "idle";
   });
 
-  const [error,      setError]      = useState<string | null>(null);
-  const [resumeTab,       setResumeTab]       = useState<"final" | "ats">("final");
-  const [copyLabel,       setCopyLabel]       = useState("Copy");
-  const [exporting,       setExporting]       = useState(false);
-  const [polishOpen,      setPolishOpen]      = useState(false);
-  const [polishText,      setPolishText]      = useState("");
-  const [polishing,       setPolishing]       = useState(false);
+  const [error,       setError]       = useState<string | null>(null);
+  const [resumeTab,   setResumeTab]   = useState<"final" | "ats">("final");
+  const [copyLabel,   setCopyLabel]   = useState("Copy");
+  const [exporting,   setExporting]   = useState(false);
+  const [polishOpen,  setPolishOpen]  = useState(false);
+  const [polishText,  setPolishText]  = useState("");
+  const [polishing,   setPolishing]   = useState(false);
 
   const [atsRubric,            setAtsRubric]            = useState<ATSRubricItem[]>(session.ats_rubric ?? []);
   const [intentRubric,         setIntentRubric]         = useState<IntentRubric | null>(session.intent_rubric ?? null);
+  const [knockoutItems,        setKnockoutItems]        = useState<KnockoutItem[]>(session.knockout_rubric ?? []);
   const [vectorizedActivities, setVectorizedActivities] = useState<Activity[]>([]);
   const [matches,              setMatches]              = useState<Record<string, VectorMatch[]>>(session.vector_matches ?? {});
   const [selections,           setSelections]           = useState<Record<string, string[]>>(session.selections ?? {});
-  const [statements,           setStatements]           = useState<Statement[]>(session.statements ?? []);
+  const [generatedBullets,     setGeneratedBullets]     = useState<Record<string, GeneratedBullet>>({});
   const [customActivities,     setCustomActivities]     = useState<Activity[]>([]);
   const [atsResume,            setAtsResume]            = useState<string>(session.ats_resume ?? "");
   const [finalResume,          setFinalResume]          = useState<string>(session.final_resume ?? "");
+
+  // Track in-flight bullet generation so we can cancel if deselected
+  const abortControllers = useRef<Record<string, AbortController>>({});
+
+  // Background matching (step4 runs in parallel with knockout-check screen)
+  const matchingDoneRef    = useRef(false);
+  const matchingErrorRef   = useRef<string | null>(null);
+  const pendingMatchRef    = useRef<Promise<void> | null>(null);
+  const matchingResultRef  = useRef<{
+    atsRubric:  ATSRubricItem[];
+    matches:    Record<string, VectorMatch[]>;
+    selections: Record<string, string[]>;
+  } | null>(null);
+  const [matchingComplete, setMatchingComplete] = useState(false);
 
   async function save(updates: Record<string, unknown>) {
     await supabase.from("pipeline_sessions").update(updates).eq("id", sessionId);
   }
 
-  // ── Custom activity handler ──────────────────────────────────────────────────
+  // ── Inline bullet generation ─────────────────────────────────────────────
 
-  function handleCustomBullet(rubricId: string, bulletId: string, draft: { job_title: string; company: string; dates_worked: string; location: string; situation: string; action: string; impact: string }) {
+  async function generateBullet(rubricId: string, bulletId: string, activity: Activity, rubricItem: ATSRubricItem) {
+    const controller = new AbortController();
+    abortControllers.current[bulletId] = controller;
+
+    setGeneratedBullets((prev) => ({
+      ...prev,
+      [bulletId]: { statement: "", generating: true, rubricId, error: undefined },
+    }));
+
+    try {
+      const result = await apiFetch<{ statement: string }>("/api/pipeline/generate-bullet", {
+        rubric_item: rubricItem,
+        activity,
+      });
+      if (controller.signal.aborted) return;
+      setGeneratedBullets((prev) => ({
+        ...prev,
+        [bulletId]: { statement: result.statement, generating: false, rubricId },
+      }));
+    } catch (err: unknown) {
+      if (controller.signal.aborted) return;
+      setGeneratedBullets((prev) => ({
+        ...prev,
+        [bulletId]: {
+          statement: "",
+          generating: false,
+          rubricId,
+          error: err instanceof Error ? err.message : "Generation failed",
+        },
+      }));
+    } finally {
+      delete abortControllers.current[bulletId];
+    }
+  }
+
+  function deleteBullet(bulletId: string) {
+    abortControllers.current[bulletId]?.abort();
+    delete abortControllers.current[bulletId];
+    setGeneratedBullets((prev) => {
+      const next = { ...prev };
+      delete next[bulletId];
+      return next;
+    });
+  }
+
+  // ── Activity toggle handler (called from MatchReview) ────────────────────
+
+  function handleActivityToggle(rubricId: string, bulletId: string, activity: Activity, selected: boolean) {
+    setSelections((prev) => {
+      const next = { ...prev };
+      if (selected) {
+        next[rubricId] = [...(next[rubricId] ?? []), bulletId];
+      } else {
+        next[rubricId] = (next[rubricId] ?? []).filter((id) => id !== bulletId);
+      }
+      save({ selections: next });
+      return next;
+    });
+
+    if (selected) {
+      const rubricItem = atsRubric.find((r) => r.rubric_id === rubricId);
+      if (rubricItem) generateBullet(rubricId, bulletId, activity, rubricItem);
+    } else {
+      deleteBullet(bulletId);
+    }
+  }
+
+  // ── Custom activity handler ──────────────────────────────────────────────
+
+  function handleCustomBullet(
+    rubricId: string,
+    bulletId: string,
+    draft: { job_title: string; company: string; dates_worked: string; location: string; situation: string; action: string; impact: string }
+  ) {
     const activity: Activity = {
       bullet_id:        bulletId,
       entry_type:       "work",
@@ -131,13 +215,67 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       impact:           draft.impact,
       extracted_skills: [],
     };
-    setCustomActivities((prev) => {
-      const filtered = prev.filter((a) => !a.bullet_id.startsWith(`custom_${rubricId}`));
-      return [...filtered, activity];
+    setCustomActivities((prev) => [...prev.filter((a) => !a.bullet_id.startsWith(`custom_${rubricId}`)), activity]);
+
+    // Auto-select and generate
+    setSelections((prev) => {
+      const next = { ...prev, [rubricId]: [...(prev[rubricId] ?? []), bulletId] };
+      save({ selections: next });
+      return next;
     });
+
+    const rubricItem = atsRubric.find((r) => r.rubric_id === rubricId);
+    if (rubricItem) generateBullet(rubricId, bulletId, activity, rubricItem);
   }
 
-  // ── Step 1+2+3: Analyze ──────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  function buildDefaultSelections(matches: Record<string, VectorMatch[]>): Record<string, string[]> {
+    const candidates: { rubricId: string; bulletId: string; score: number }[] = [];
+    for (const [rId, vmList] of Object.entries(matches)) {
+      for (const vm of vmList) {
+        if (vm.similarity_score >= 0.5) {
+          candidates.push({ rubricId: rId, bulletId: vm.bullet_id, score: vm.similarity_score });
+        }
+      }
+    }
+    candidates.sort((a, b) => b.score - a.score);
+
+    const result: Record<string, string[]> = {};
+    const seen   = new Set<string>();
+    for (const { rubricId, bulletId } of candidates) {
+      if (seen.size >= 20) break;
+      if (!seen.has(bulletId)) {
+        seen.add(bulletId);
+        if (!result[rubricId]) result[rubricId] = [];
+        result[rubricId].push(bulletId);
+      }
+    }
+    return result;
+  }
+
+  function applyMatchingResult(
+    result: { atsRubric: ATSRubricItem[]; matches: Record<string, VectorMatch[]>; selections: Record<string, string[]> },
+    sourceActivities: Activity[],
+  ) {
+    setAtsRubric(result.atsRubric);
+    setMatches(result.matches);
+    setSelections(result.selections);
+
+    // Pre-generate bullets for all pre-selected activities
+    const activitiesById = Object.fromEntries(sourceActivities.map((a) => [a.bullet_id, a]));
+    const rubricById     = Object.fromEntries(result.atsRubric.map((r) => [r.rubric_id, r]));
+    for (const [rubricId, bulletIds] of Object.entries(result.selections)) {
+      const rubricItem = rubricById[rubricId];
+      if (!rubricItem) continue;
+      for (const bulletId of bulletIds) {
+        const activity = activitiesById[bulletId];
+        if (activity) generateBullet(rubricId, bulletId, activity, rubricItem);
+      }
+    }
+  }
+
+  // ── Step 1+2+3: Analyze, then kick off step4 in background ───────────────
 
   async function runAnalysis() {
     if (activities.length === 0) {
@@ -158,24 +296,22 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         apiFetch<{ activities: Activity[] }>("/api/pipeline/step1", { activities }),
       ]);
 
-      // Persist embeddings back to Supabase in the background
       const withVectors = step1Result.activities.filter((a) => a.vector?.length);
       if (withVectors.length > 0) {
         Promise.all(
           withVectors.map((a) =>
-            supabase
-              .from("activities")
-              .update({ embedding: a.vector })
-              .eq("bullet_id", a.bullet_id)
+            supabase.from("activities").update({ embedding: a.vector }).eq("bullet_id", a.bullet_id)
           )
         ).catch(() => {/* non-fatal */});
       }
 
-      setVectorizedActivities(step1Result.activities);
+      const vectorActivities = step1Result.activities;
+      setVectorizedActivities(vectorActivities);
 
       const step3Result = await apiFetch<{
-        ats_rubric: ATSRubricItem[];
-        intent_rubric: IntentRubric;
+        ats_rubric:      ATSRubricItem[];
+        intent_rubric:   IntentRubric;
+        knockout_rubric: KnockoutItem[];
       }>("/api/pipeline/step3", {
         ...step2Result,
         job_description_raw: session.job_description_raw,
@@ -183,47 +319,52 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
       setAtsRubric(step3Result.ats_rubric);
       setIntentRubric(step3Result.intent_rubric);
+      setKnockoutItems(step3Result.knockout_rubric ?? []);
 
       await save({
-        cleaned_jd:    step2Result,
-        ats_rubric:    step3Result.ats_rubric,
-        intent_rubric: step3Result.intent_rubric,
-        current_step:  3,
+        cleaned_jd:      step2Result,
+        ats_rubric:      step3Result.ats_rubric,
+        intent_rubric:   step3Result.intent_rubric,
+        knockout_rubric: step3Result.knockout_rubric,
+        current_step:    3,
       });
 
-      setStage("rubric-review");
+      // Reset background match state
+      matchingDoneRef.current   = false;
+      matchingErrorRef.current  = null;
+      matchingResultRef.current = null;
+      setMatchingComplete(false);
+
+      // Start step4 in the background — runs while user reviews knockout screen
+      pendingMatchRef.current = startBackgroundMatching(step3Result.ats_rubric, vectorActivities);
+
+      setStage("knockout-check");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Pipeline failed");
       setStage("idle");
     }
   }
 
-  // ── Step 4: Match (called after rubric review) ───────────────────────────
+  // ── Step 4: Match (background) ───────────────────────────────────────────
 
-  async function runMatching(confirmedRubric: ATSRubricItem[]) {
-    setError(null);
-    setAtsRubric(confirmedRubric);
-    setStage("matching");
-
+  async function startBackgroundMatching(confirmedRubric: ATSRubricItem[], vectorActivities: Activity[]): Promise<void> {
     try {
       const step4Result = await apiFetch<{
         ats_rubric: ATSRubricItem[];
-        matches: Record<string, VectorMatch[]>;
+        matches:    Record<string, VectorMatch[]>;
       }>("/api/pipeline/step4", {
         ats_rubric: confirmedRubric,
-        activities: vectorizedActivities.length > 0 ? vectorizedActivities : activities,
-        top_k: 5,
+        activities: vectorActivities,
+        top_k: 8,
       });
 
-      setAtsRubric(step4Result.ats_rubric);
-      setMatches(step4Result.matches);
+      const defaultSelections = buildDefaultSelections(step4Result.matches);
 
-      const defaultSelections: Record<string, string[]> = {};
-      for (const [rId, vmList] of Object.entries(step4Result.matches)) {
-        const good = vmList.filter((m) => m.similarity_score >= 0.5);
-        defaultSelections[rId] = good.length > 0 ? good.map((m) => m.bullet_id) : [];
-      }
-      setSelections(defaultSelections);
+      matchingResultRef.current = {
+        atsRubric:  step4Result.ats_rubric,
+        matches:    step4Result.matches,
+        selections: defaultSelections,
+      };
 
       await save({
         ats_rubric:     step4Result.ats_rubric,
@@ -231,55 +372,86 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         selections:     defaultSelections,
         current_step:   4,
       });
-
-      setStage("review");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Matching failed");
-      setStage("rubric-review");
+      matchingErrorRef.current = err instanceof Error ? err.message : "Matching failed";
+    } finally {
+      matchingDoneRef.current = true;
+      setMatchingComplete(true);
     }
   }
 
-  // ── Step 5: Generate bullets ─────────────────────────────────────────────
+  // ── Proceed from knockout check → matching done → review ─────────────────
 
-  async function runGeneration() {
-    setError(null);
-    setStage("generating");
-
-    try {
-      const sourceActivities = [
-        ...(vectorizedActivities.length > 0 ? vectorizedActivities : activities),
-        ...customActivities,
-      ];
-
-      const step5Result = await apiFetch<{ statements: Statement[]; thinking?: string }>(
-        "/api/pipeline/step5",
-        {
-          ats_rubric:      atsRubric,
-          activities:      sourceActivities,
-          selections,
-          holistic_person: intentRubric?.holistic_summary ?? "",
-        }
-      );
-
-      setStatements(step5Result.statements);
-      await save({ statements: step5Result.statements, current_step: 5 });
-
-      setStage("bullet-review");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Generation failed");
-      setStage("review");
+  async function proceedFromKnockoutCheck() {
+    // If matching isn't done yet, show spinner and wait
+    if (!matchingDoneRef.current) {
+      setStage("matching");
+      try {
+        await pendingMatchRef.current;
+      } catch {/* error captured in matchingErrorRef */}
     }
+
+    if (matchingErrorRef.current) {
+      setError(matchingErrorRef.current);
+      setStage("knockout-check");
+      return;
+    }
+
+    const result = matchingResultRef.current;
+    if (!result) {
+      setError("Matching did not produce results. Please try again.");
+      setStage("idle");
+      return;
+    }
+
+    const sourceActivities = vectorizedActivities.length > 0 ? vectorizedActivities : activities;
+    applyMatchingResult(result, sourceActivities);
+    setStage("review");
   }
 
-  // ── Steps 6+7: Assemble (called after bullet review) ────────────────────
+  // ── Build resume from inline-generated bullets ───────────────────────────
+
+  async function runAssemblyFromBullets() {
+    const sourceActivities = [
+      ...(vectorizedActivities.length > 0 ? vectorizedActivities : activities),
+      ...customActivities,
+    ];
+    const activitiesById = Object.fromEntries(sourceActivities.map((a) => [a.bullet_id, a]));
+
+    const statements: Statement[] = [];
+    for (const [bulletId, genBullet] of Object.entries(generatedBullets)) {
+      if (!genBullet.statement || genBullet.generating) continue;
+      const activity = activitiesById[bulletId];
+      if (!activity) continue;
+      const rubricItem = atsRubric.find((r) => r.rubric_id === genBullet.rubricId);
+      statements.push({
+        bullet_id:          bulletId,
+        statement:          genBullet.statement,
+        error:              null,
+        job_title:          activity.job_title,
+        company:            activity.company,
+        dates:              activity.dates_worked,
+        location:           activity.location,
+        entry_type:         activity.entry_type,
+        rubric_ids:         [genBullet.rubricId],
+        rubric_items:       [rubricItem?.item ?? ""],
+        primary_rubric_id:  genBullet.rubricId,
+        primary_rubric_item: rubricItem?.item ?? "",
+        rewrite_logic:      genBullet.rubricId,
+      });
+    }
+
+    await runAssembly(statements);
+  }
+
+  // ── Steps 6+7: Assemble ──────────────────────────────────────────────────
 
   async function runAssembly(confirmedStatements: Statement[]) {
     setError(null);
-    setStatements(confirmedStatements);
     setStage("assembling");
 
     try {
-      const allActivities = vectorizedActivities.length > 0 ? vectorizedActivities : activities;
+      const allActivities      = vectorizedActivities.length > 0 ? vectorizedActivities : activities;
       const consolidatedSkills = [...new Set(allActivities.flatMap((a) => a.extracted_skills ?? []))];
 
       const template = {
@@ -293,7 +465,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         skills:         profile?.skills         ?? [],
         awards:         profile?.awards         ?? [],
         certifications: profile?.certifications ?? [],
-        education:      education,
+        education,
       };
 
       const step6Result = await apiFetch<{ ats_resume: string; thinking?: string }>("/api/pipeline/step6", {
@@ -323,7 +495,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       setStage("done");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Assembly failed");
-      setStage("bullet-review");
+      setStage("review");
     }
   }
 
@@ -407,9 +579,9 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
       a.download = `${name.replace(/\s+/g, "_")}.docx`;
       a.click();
       URL.revokeObjectURL(url);
@@ -439,7 +611,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       if (!result.ok) throw new Error(`Polish failed (${result.status})`);
       const data: { polished_text: string; thinking?: string } = await result.json();
       if (resumeTab === "final") { setFinalResume(data.polished_text); save({ final_resume: data.polished_text }); }
-      else                       { setAtsResume(data.polished_text);   save({ ats_resume: data.polished_text });   }
+      else                       { setAtsResume(data.polished_text);   save({ ats_resume:   data.polished_text }); }
       setPolishText("");
       setPolishOpen(false);
     } catch (err: unknown) {
@@ -454,6 +626,9 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   const currentStepIdx = PIPELINE_STAGES.findIndex((s) => s.stages.includes(stage));
   const resumeName     = session.title || profile?.name || "resume";
   const activeResume   = resumeTab === "final" ? finalResume : atsResume;
+
+  const generatingCount = Object.values(generatedBullets).filter((g) => g.generating).length;
+  const readyCount      = Object.values(generatedBullets).filter((g) => g.statement && !g.generating).length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -514,20 +689,24 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         <div className="bg-white rounded-xl border border-zinc-200 p-6">
           <div className="flex items-center gap-3">
             <Spinner />
-            <span className="text-sm font-medium text-zinc-700">Analyzing job description…</span>
+            <span className="text-sm font-medium text-zinc-700">Analyzing job description and building rubrics…</span>
           </div>
         </div>
       )}
 
-      {/* ── RUBRIC REVIEW ── */}
-      {stage === "rubric-review" && (
-        <div className="flex flex-col gap-4">
-          {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
-          <RubricEditor rubric={atsRubric} onConfirm={runMatching} />
-        </div>
+      {/* ── KNOCKOUT CHECK ── */}
+      {stage === "knockout-check" && (
+        <KnockoutCheck
+          knockoutItems={knockoutItems}
+          profile={profile}
+          education={education}
+          activities={activities}
+          matchingComplete={matchingComplete}
+          onContinue={proceedFromKnockoutCheck}
+        />
       )}
 
-      {/* ── MATCHING ── */}
+      {/* ── MATCHING (brief spinner if step4 not done when user clicks Continue) ── */}
       {stage === "matching" && (
         <div className="bg-white rounded-xl border border-zinc-200 p-6">
           <div className="flex items-center gap-3">
@@ -542,44 +721,18 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         <div className="flex flex-col gap-4">
           <MatchReview
             atsRubric={atsRubric}
+            knockoutItems={knockoutItems}
             matches={matches}
             activities={[...activities, ...customActivities]}
             selections={selections}
-            onSelectionsChange={(s) => { setSelections(s); save({ selections: s }); }}
+            generatedBullets={generatedBullets}
+            generatingCount={generatingCount}
+            buildDisabled={readyCount === 0 || generatingCount > 0}
+            onActivityToggle={handleActivityToggle}
             onCustomBullet={handleCustomBullet}
+            onBuild={runAssemblyFromBullets}
           />
-
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
-
-          <div className="flex items-center gap-4" data-no-print>
-            <button
-              onClick={runGeneration}
-              className="rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 transition-colors"
-            >
-              Generate bullets →
-            </button>
-            <span className="text-xs text-zinc-400">
-              {Object.values(selections).filter((v) => v.length > 0).length} / {atsRubric.length} requirements matched
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* ── GENERATING ── */}
-      {stage === "generating" && (
-        <div className="bg-white rounded-xl border border-zinc-200 p-6">
-          <div className="flex items-center gap-3">
-            <Spinner />
-            <span className="text-sm font-medium text-zinc-700">Generating bullets in parallel…</span>
-          </div>
-        </div>
-      )}
-
-      {/* ── BULLET REVIEW ── */}
-      {stage === "bullet-review" && (
-        <div className="flex flex-col gap-4">
-          {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
-          <BulletEditor statements={statements} onConfirm={runAssembly} />
         </div>
       )}
 
@@ -635,7 +788,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
               </p>
               <div className="flex flex-col gap-1">
                 <div className="flex flex-wrap gap-1 mb-1">
-                  {["Fix repetitive action verbs", "Tighten bullets to one line each", "Strengthen the summary", "Add more quantified results"].map((s) => (
+                  {["Fix repetitive action verbs", "Tighten bullets to one line each", "Add more quantified results"].map((s) => (
                     <button
                       key={s}
                       type="button"
@@ -678,11 +831,11 @@ export default function PipelineRunner({ sessionId, session, activities, profile
           />
 
           <button
-            onClick={() => { setStage("bullet-review"); setError(null); }}
+            onClick={() => { setStage("review"); setError(null); }}
             className="self-start text-sm text-zinc-400 hover:text-zinc-700 underline transition-colors"
             data-no-print
           >
-            ← Back to bullet review
+            ← Back to match
           </button>
         </div>
       )}
