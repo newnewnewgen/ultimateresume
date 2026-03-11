@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import MatchReview from "./MatchReview";
 import KnockoutCheck from "./KnockoutCheck";
@@ -98,6 +98,13 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   const [polishText,  setPolishText]  = useState("");
   const [polishing,   setPolishing]   = useState(false);
 
+  const [analyzingLog,  setAnalyzingLog]  = useState<LogEntry[]>([]);
+  const [assemblingLog, setAssemblingLog] = useState<LogEntry[]>([]);
+
+  function setLogStatus(setter: React.Dispatch<React.SetStateAction<LogEntry[]>>, id: string, status: LogStatus, detail?: string) {
+    setter((prev) => prev.map((e) => e.id === id ? { ...e, status, detail: detail ?? e.detail } : e));
+  }
+
   const [atsRubric,            setAtsRubric]            = useState<ATSRubricItem[]>(session.ats_rubric ?? []);
   const [intentRubric,         setIntentRubric]         = useState<IntentRubric | null>(session.intent_rubric ?? null);
   const [knockoutItems,        setKnockoutItems]        = useState<KnockoutItem[]>(session.knockout_rubric ?? []);
@@ -122,6 +129,16 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     selections: Record<string, string[]>;
   } | null>(null);
   const [matchingComplete, setMatchingComplete] = useState(false);
+
+  // Auto-start analysis for brand-new sessions (current_step === 0)
+  const didAutoStart = useRef(false);
+  useEffect(() => {
+    if (!didAutoStart.current && stage === "idle" && (session.current_step ?? 0) === 0) {
+      didAutoStart.current = true;
+      runAnalysis();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function save(updates: Record<string, unknown>) {
     await supabase.from("pipeline_sessions").update(updates).eq("id", sessionId);
@@ -283,6 +300,12 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       return;
     }
     setError(null);
+    setAnalyzingLog([
+      { id: "vec",     label: `Vectorizing ${activities.length} activities`,  status: "running" },
+      { id: "jd",      label: "Parsing job description",                      status: "running" },
+      { id: "rubrics", label: "Building rubrics (ATS · Intent · Knockout)",   status: "waiting" },
+      { id: "match",   label: "Running activity matching",                    status: "waiting" },
+    ]);
     setStage("analyzing");
 
     try {
@@ -295,6 +318,10 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         }>("/api/pipeline/step2", { job_description: session.job_description_raw }),
         apiFetch<{ activities: Activity[] }>("/api/pipeline/step1", { activities }),
       ]);
+
+      setLogStatus(setAnalyzingLog, "vec", "done", `${step1Result.activities.filter((a) => a.vector?.length).length} embedded`);
+      setLogStatus(setAnalyzingLog, "jd",  "done", `${step2Result.required_skills.length} required skills identified`);
+      setLogStatus(setAnalyzingLog, "rubrics", "running");
 
       const withVectors = step1Result.activities.filter((a) => a.vector?.length);
       if (withVectors.length > 0) {
@@ -316,6 +343,10 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         ...step2Result,
         job_description_raw: session.job_description_raw,
       });
+
+      setLogStatus(setAnalyzingLog, "rubrics", "done",
+        `${step3Result.ats_rubric.length} ATS items · ${step3Result.knockout_rubric?.length ?? 0} knockout checks`);
+      setLogStatus(setAnalyzingLog, "match", "running");
 
       setAtsRubric(step3Result.ats_rubric);
       setIntentRubric(step3Result.intent_rubric);
@@ -374,9 +405,13 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       });
     } catch (err: unknown) {
       matchingErrorRef.current = err instanceof Error ? err.message : "Matching failed";
+      setLogStatus(setAnalyzingLog, "match", "error");
     } finally {
       matchingDoneRef.current = true;
       setMatchingComplete(true);
+      if (!matchingErrorRef.current) {
+        setLogStatus(setAnalyzingLog, "match", "done", "Activities matched to requirements");
+      }
     }
   }
 
@@ -448,6 +483,10 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
   async function runAssembly(confirmedStatements: Statement[]) {
     setError(null);
+    setAssemblingLog([
+      { id: "draft",  label: "Drafting ATS-optimized resume",  status: "running" },
+      { id: "polish", label: "Polishing final resume",          status: "waiting" },
+    ]);
     setStage("assembling");
 
     try {
@@ -476,6 +515,8 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         consolidated_skills: consolidatedSkills,
       });
 
+      setLogStatus(setAssemblingLog, "draft",  "done",    step6Result.thinking ?? undefined);
+      setLogStatus(setAssemblingLog, "polish", "running");
       setAtsResume(step6Result.ats_resume);
 
       const step7Result = await apiFetch<{ final_resume: string; thinking?: string }>("/api/pipeline/step7", {
@@ -484,6 +525,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         ats_keywords:  atsRubric.flatMap((r) => r.ats_keywords),
       });
 
+      setLogStatus(setAssemblingLog, "polish", "done", step7Result.thinking ?? undefined);
       setFinalResume(step7Result.final_resume);
 
       await save({
@@ -634,8 +676,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     <div className="flex flex-col gap-6">
 
       {/* Step progress bar */}
-      {stage !== "idle" && (
-        <div className="flex items-center gap-1 flex-wrap" data-no-print>
+      <div className="flex items-center gap-1 flex-wrap" data-no-print>
           {PIPELINE_STAGES.map((step, i) => (
             <div key={step.label} className="flex items-center gap-1">
               <span className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
@@ -651,7 +692,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
             </div>
           ))}
         </div>
-      )}
 
       {/* ── IDLE ── */}
       {stage === "idle" && (
@@ -686,11 +726,12 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
       {/* ── ANALYZING ── */}
       {stage === "analyzing" && (
-        <div className="bg-white rounded-xl border border-zinc-200 p-6">
+        <div className="bg-white rounded-xl border border-zinc-200 p-5 flex flex-col gap-4">
           <div className="flex items-center gap-3">
             <Spinner />
-            <span className="text-sm font-medium text-zinc-700">Analyzing job description and building rubrics…</span>
+            <span className="text-sm font-semibold text-zinc-800">Analyzing job description…</span>
           </div>
+          <PipelineLog entries={analyzingLog} />
         </div>
       )}
 
@@ -738,11 +779,12 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
       {/* ── ASSEMBLING ── */}
       {stage === "assembling" && (
-        <div className="bg-white rounded-xl border border-zinc-200 p-6">
+        <div className="bg-white rounded-xl border border-zinc-200 p-5 flex flex-col gap-4">
           <div className="flex items-center gap-3">
             <Spinner />
-            <span className="text-sm font-medium text-zinc-700">Assembling resume…</span>
+            <span className="text-sm font-semibold text-zinc-800">Assembling resume…</span>
           </div>
+          <PipelineLog entries={assemblingLog} />
         </div>
       )}
 
@@ -848,6 +890,61 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 function Spinner() {
   return (
     <div className="w-4 h-4 rounded-full border-2 border-zinc-900 border-t-transparent animate-spin shrink-0" />
+  );
+}
+
+type LogStatus = "waiting" | "running" | "done" | "error";
+type LogEntry  = { id: string; label: string; status: LogStatus; detail?: string };
+
+function PipelineLog({ entries }: { entries: LogEntry[] }) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  if (entries.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1.5 pl-1">
+      {entries.map((e) => (
+        <div key={e.id} className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2.5">
+            {e.status === "running" ? (
+              <div className="w-3 h-3 rounded-full border-2 border-zinc-500 border-t-transparent animate-spin shrink-0" />
+            ) : e.status === "done" ? (
+              <svg className="w-3 h-3 text-green-500 shrink-0" fill="none" viewBox="0 0 12 12">
+                <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            ) : e.status === "error" ? (
+              <svg className="w-3 h-3 text-red-400 shrink-0" fill="none" viewBox="0 0 12 12">
+                <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+            ) : (
+              <div className="w-3 h-3 rounded-full border border-zinc-300 shrink-0" />
+            )}
+            <span className={`text-sm ${
+              e.status === "running" ? "text-zinc-800 font-medium" :
+              e.status === "done"    ? "text-zinc-600" :
+              e.status === "error"   ? "text-red-600"  :
+                                       "text-zinc-400"
+            }`}>
+              {e.label}
+            </span>
+            {e.status === "done" && e.detail && (
+              <span className="text-xs text-zinc-400 truncate flex-1 min-w-0">{e.detail.length > 120 ? (
+                <>
+                  {expanded[e.id] ? e.detail : e.detail.slice(0, 120) + "…"}
+                  <button onClick={() => setExpanded((p) => ({ ...p, [e.id]: !p[e.id] }))} className="ml-1 text-blue-500 hover:underline text-xs">
+                    {expanded[e.id] ? "less" : "more"}
+                  </button>
+                </>
+              ) : e.detail}</span>
+            )}
+          </div>
+          {/* Long thinking text shown in a block below */}
+          {e.status === "done" && e.detail && e.detail.length > 120 && expanded[e.id] && (
+            <div className="ml-5 rounded-lg bg-zinc-50 border border-zinc-100 px-3 py-2 text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">
+              {e.detail}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

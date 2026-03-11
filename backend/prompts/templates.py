@@ -669,6 +669,11 @@ Do NOT include:
   - General job duties or responsibilities
   - Any requirement where the posting uses language like "preferred", "a plus", "ideally",
     "experience with", "familiarity with", or "bonus"
+  - Start dates, availability windows, or timing requirements (e.g., "Must be able to start
+    in August 2025", "available to begin within 2 weeks", "immediate availability required")
+    → These are not profile-based and cannot be verified from a resume
+  - Willingness-to-travel, shift, or schedule preferences (e.g., "willing to work weekends",
+    "open to 25% travel") — assume the candidate is flexible
 
 Return EXACTLY this JSON format (no extra text):
 {{
