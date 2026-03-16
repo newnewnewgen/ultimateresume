@@ -155,6 +155,7 @@ class VectorMatch:
     bullet_id: str
     similarity_score: float
     activity: Optional[ActivityBullet] = None
+    match_reason: str = ""
 
 
 @dataclass

@@ -223,25 +223,31 @@ def find_top_matches(
     rubric_item: ATSRubricItem,
     activities: list[ActivityBullet],
     top_k: int = 3,
+    extra_rubric_vectors: list[list[float]] | None = None,
 ) -> list[VectorMatch]:
     """Find the top-k matching activities using hybrid scoring.
 
     Hybrid score = (SEMANTIC_WEIGHT * cosine_sim)
                  + (KEYWORD_WEIGHT * keyword_overlap)
                  + (CONTEXT_WEIGHT * context_overlap)
+
+    If extra_rubric_vectors are provided (from query expansion), the semantic
+    score is the MAX cosine similarity across the original + all expansion vectors.
+    This implements multi-query retrieval to catch synonym/paraphrase matches.
     """
     if not rubric_item.vector:
         raise ValueError(f"Rubric item {rubric_item.rubric_id} has no vector")
 
     keyphrases = _extract_keyphrases(rubric_item)
+    all_rubric_vecs = [rubric_item.vector] + (extra_rubric_vectors or [])
 
     scores: list[tuple[float, ActivityBullet]] = []
     for activity in activities:
         if not activity.vector:
             continue
 
-        # 1. Semantic similarity from Gemini embeddings
-        sem_score = cosine_similarity(rubric_item.vector, activity.vector)
+        # 1. Semantic similarity — max over original + expansion query vectors
+        sem_score = max(cosine_similarity(rv, activity.vector) for rv in all_rubric_vecs)
 
         # 2. Keyword / phrase overlap (uses extracted skills + raw text)
         kw_score = _keyword_overlap_score(keyphrases, activity)

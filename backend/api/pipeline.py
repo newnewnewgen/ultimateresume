@@ -123,6 +123,7 @@ class VectorMatchOut(BaseModel):
     rubric_id: str
     bullet_id: str
     similarity_score: float
+    match_reason: str = ""
 
 
 class Step4Request(BaseModel):
@@ -357,6 +358,7 @@ async def step4(req: Step4Request):
                     rubric_id=vm.rubric_id,
                     bullet_id=vm.bullet_id,
                     similarity_score=vm.similarity_score,
+                    match_reason=vm.match_reason,
                 )
                 for vm in vm_list
             ]

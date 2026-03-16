@@ -558,6 +558,95 @@ def polish_resume(resume_text: str, instruction: str) -> str:
     return text.strip(), thinking
 
 
+def expand_rubric_queries(rubric_item: ATSRubricItem) -> list[str]:
+    """Generate 3 alternative phrasings of a rubric item to improve retrieval recall.
+
+    Uses Flash to produce synonym/paraphrase variants. The caller embeds all variants
+    and takes the max cosine similarity per activity (query expansion / multi-query retrieval).
+    """
+    from prompts.templates import EXPAND_RUBRIC_QUERY
+    prompt = EXPAND_RUBRIC_QUERY.format(
+        item=rubric_item.item,
+        ats_keywords=", ".join(rubric_item.ats_keywords),
+        situation_description=rubric_item.situation_description or "Not specified",
+    )
+    try:
+        response = _call_gemini(prompt, max_output_tokens=512, json_mode=True)
+        data = _extract_json(response)
+        queries = [q.strip() for q in data.get("queries", []) if isinstance(q, str) and q.strip()]
+        return queries[:3]
+    except Exception:
+        return []
+
+
+def rerank_activity_matches(
+    rubric_item: ATSRubricItem,
+    candidates: "list[VectorMatch]",
+) -> "list[VectorMatch]":
+    """Re-rank candidate matches using LLM cross-encoder scoring.
+
+    Sends all candidates for a rubric item to Gemini Flash in a single call.
+    Scores 0–10 and attaches a one-sentence reason to each match.
+    Falls back to original ordering on any error.
+    """
+    from core.models import VectorMatch
+    from prompts.templates import RERANK_MATCHES
+
+    if not candidates:
+        return candidates
+
+    candidates_with_activity = [vm for vm in candidates if vm.activity]
+    if not candidates_with_activity:
+        return candidates
+
+    candidates_json = json.dumps([
+        {
+            "bullet_id":  vm.activity.bullet_id,
+            "job_title":  vm.activity.job_title,
+            "company":    vm.activity.company,
+            "situation":  vm.activity.situation,
+            "action":     vm.activity.action,
+            "impact":     vm.activity.impact,
+            "skills":     vm.activity.extracted_skills,
+        }
+        for vm in candidates_with_activity
+    ], indent=2)
+
+    prompt = RERANK_MATCHES.format(
+        item=rubric_item.item,
+        priority=rubric_item.priority,
+        ats_keywords=", ".join(rubric_item.ats_keywords),
+        situation_description=rubric_item.situation_description or "Not specified",
+        action_description=rubric_item.action_description or "Not specified",
+        candidates_json=candidates_json,
+    )
+
+    try:
+        response = _call_gemini(prompt, max_output_tokens=2048, json_mode=True)
+        data = _extract_json(response)
+        score_map: dict[str, tuple[float, str]] = {
+            r["bullet_id"]: (float(r.get("score", 0)), r.get("reason", ""))
+            for r in data.get("rankings", [])
+            if isinstance(r.get("bullet_id"), str)
+        }
+    except Exception:
+        return candidates  # fall back to original vector ordering
+
+    # Re-sort by LLM score (descending)
+    def _llm_score(vm: VectorMatch) -> float:
+        return score_map.get(vm.bullet_id, (0.0, ""))[0]
+
+    reranked = sorted(candidates, key=_llm_score, reverse=True)
+
+    # Blend LLM score with original hybrid score; attach reason
+    for vm in reranked:
+        llm_score, reason = score_map.get(vm.bullet_id, (0.0, ""))
+        vm.similarity_score = 0.5 * vm.similarity_score + 0.5 * (llm_score / 10.0)
+        vm.match_reason = reason
+
+    return reranked
+
+
 def extract_skills_from_activities(activities: list) -> dict[str, list[str]]:
     """Use AI to extract skills/technologies from each activity bullet.
 

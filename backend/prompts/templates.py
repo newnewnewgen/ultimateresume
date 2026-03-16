@@ -321,6 +321,56 @@ RULES — READ CAREFULLY:
 Return the COMPLETE resume as formatted plain text.
 """
 
+RERANK_MATCHES = """\
+You are an expert recruiter reviewing resume activities for job fit.
+
+JOB REQUIREMENT:
+Skill: {item} ({priority})
+Keywords expected: {ats_keywords}
+Situation context: {situation_description}
+How strong candidates demonstrate it: {action_description}
+
+CANDIDATE ACTIVITIES:
+{candidates_json}
+
+Score each activity 0–10 based on how directly and specifically it demonstrates the job requirement.
+
+Scoring guide:
+- 9-10: Activity explicitly demonstrates this exact skill/tool/methodology with clear evidence
+- 7-8: Activity clearly demonstrates it, though may use different terminology
+- 5-6: Activity is adjacent — related domain or partial match
+- 3-4: Activity is loosely relevant
+- 0-2: Activity does not demonstrate this requirement
+
+Write a one-sentence reason for each score (max 15 words). Be specific about what matched or didn't.
+
+Return EXACTLY this JSON (no extra text):
+{{
+  "rankings": [
+    {{"bullet_id": "...", "score": 8, "reason": "Directly demonstrates X by doing Y"}},
+    ...
+  ]
+}}
+"""
+
+EXPAND_RUBRIC_QUERY = """\
+You are helping match job requirements to resume activities.
+
+JOB REQUIREMENT:
+Skill: {item}
+Keywords: {ats_keywords}
+Context: {situation_description}
+
+Generate 3 alternative phrasings of this requirement that would help find matching resume activities.
+Each phrasing should use different vocabulary — synonyms, related tools, alternate framings.
+Keep each phrasing short (5-15 words). Do NOT repeat the original phrasing.
+
+Return EXACTLY this JSON (no extra text):
+{{
+  "queries": ["...", "...", "..."]
+}}
+"""
+
 POLISH_RESUME = """\
 You are an expert resume editor. You have a complete, ATS-optimized resume and a specific
 instruction from the user. Apply the instruction precisely and return the full polished resume.

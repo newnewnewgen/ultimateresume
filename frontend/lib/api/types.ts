@@ -69,6 +69,7 @@ export interface VectorMatch {
   rubric_id: string;
   bullet_id: string;
   similarity_score: number;
+  match_reason?: string;
 }
 
 export interface Statement {

@@ -79,9 +79,9 @@ function Spinner({ color = "blue" }: { color?: "blue" | "white" }) {
 }
 
 function ActivityCard({
-  activity, score, selected, usedElsewhere, keywords, generatedBullet, onToggle,
+  activity, score, matchReason, selected, usedElsewhere, keywords, generatedBullet, onToggle,
 }: {
-  activity: Activity; score: number; selected: boolean;
+  activity: Activity; score: number; matchReason?: string; selected: boolean;
   usedElsewhere: boolean; keywords: string[];
   generatedBullet?: GeneratedBullet; onToggle: () => void;
 }) {
@@ -126,6 +126,9 @@ function ActivityCard({
           <p className="text-xs text-zinc-500 leading-snug">
             <HighlightText text={activity.impact} keywords={keywords} />
           </p>
+        )}
+        {matchReason && (
+          <p className="text-xs text-zinc-400 italic leading-snug">{matchReason}</p>
         )}
 
         {/* Generated bullet preview */}
@@ -569,6 +572,7 @@ export default function MatchReview({
                               key={vm.bullet_id}
                               activity={activity}
                               score={vm.similarity_score}
+                              matchReason={vm.match_reason}
                               selected={isSelected}
                               usedElsewhere={usedElsewhere}
                               keywords={keywords}

@@ -15,7 +15,9 @@ from core.models import (
 )
 from core.vectorizer import (
     deduplicate_rubric,
+    embed_texts_gemini,
     find_all_matches,
+    find_top_matches,
     vectorize_activity_bank,
     vectorize_ats_rubric,
 )
@@ -26,8 +28,10 @@ from core.ai_engine import (
     create_intent_rubric,
     create_knockout_rubric,
     dedup_bullets,
+    expand_rubric_queries,
     extract_skills_from_activities,
     intent_rewrite,
+    rerank_activity_matches,
     write_sti_statement,
 )
 
@@ -71,10 +75,70 @@ def step4_vectorize_and_match(
     activities: list[ActivityBullet],
     top_k: int = 5,
 ) -> tuple[list[ATSRubricItem], dict[str, list[VectorMatch]]]:
-    """Step 4: Vectorize ATS rubric, deduplicate overlapping items, and find matches."""
+    """Step 4: Vectorize ATS rubric, deduplicate, expand queries, match, and LLM re-rank.
+
+    RAG improvements applied:
+    1. Query expansion — each rubric item generates 3 synonym/paraphrase variants;
+       semantic score becomes the MAX across all query vectors (multi-query retrieval).
+    2. LLM cross-encoder re-ranking — after vector retrieval returns top_k*3 candidates,
+       Gemini Flash scores each 0-10 in context and attaches a one-sentence reason.
+    """
+    import concurrent.futures
+
     ats_rubric = vectorize_ats_rubric(ats_rubric)
     ats_rubric = deduplicate_rubric(ats_rubric)
-    matches = find_all_matches(ats_rubric, activities, top_k)
+
+    # ── 1. Query expansion: generate alternative phrasings in parallel ────────
+    expansion_texts: dict[str, list[str]] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(ats_rubric)) as executor:
+        future_to_id = {executor.submit(expand_rubric_queries, item): item.rubric_id
+                        for item in ats_rubric}
+        for future in concurrent.futures.as_completed(future_to_id):
+            rubric_id = future_to_id[future]
+            try:
+                expansion_texts[rubric_id] = future.result()
+            except Exception:
+                expansion_texts[rubric_id] = []
+
+    # ── 2. Embed all expansion texts in a single batch ───────────────────────
+    all_exp_texts: list[str] = []
+    rubric_exp_slice: dict[str, tuple[int, int]] = {}
+    for item in ats_rubric:
+        queries = expansion_texts.get(item.rubric_id, [])
+        if queries:
+            start = len(all_exp_texts)
+            all_exp_texts.extend(queries)
+            rubric_exp_slice[item.rubric_id] = (start, start + len(queries))
+
+    exp_vectors: list[list[float]] = (
+        embed_texts_gemini(all_exp_texts, task_type="RETRIEVAL_QUERY")
+        if all_exp_texts else []
+    )
+
+    # ── 3. Vector matching with expanded queries (larger pool for re-ranking) ─
+    RERANK_POOL = top_k * 3  # retrieve 3× more candidates for the re-ranker
+    rubric_by_id = {item.rubric_id: item for item in ats_rubric}
+    matches: dict[str, list[VectorMatch]] = {}
+    for item in ats_rubric:
+        s, e = rubric_exp_slice.get(item.rubric_id, (0, 0))
+        extra_vecs = exp_vectors[s:e] if s != e else None
+        matches[item.rubric_id] = find_top_matches(
+            item, activities, top_k=RERANK_POOL, extra_rubric_vectors=extra_vecs
+        )
+
+    # ── 4. LLM re-ranking in parallel ────────────────────────────────────────
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(ats_rubric)) as executor:
+        future_to_id = {
+            executor.submit(rerank_activity_matches, rubric_by_id[rid], candidates): rid
+            for rid, candidates in matches.items()
+        }
+        for future in concurrent.futures.as_completed(future_to_id):
+            rid = future_to_id[future]
+            try:
+                matches[rid] = future.result()[:top_k]
+            except Exception:
+                matches[rid] = matches[rid][:top_k]
+
     return ats_rubric, matches
 
 
