@@ -91,7 +91,8 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   });
 
   const [error,       setError]       = useState<string | null>(null);
-  const [resumeTab,   setResumeTab]   = useState<"final" | "ats">("final");
+  // Fix 4: single resume output (step 7 = keyword gap-fill only, no separate "final" tab)
+  // resumeTab removed; activeResume is always finalResume (step 7 output)
   const [copyLabel,   setCopyLabel]   = useState("Copy");
   const [exporting,   setExporting]   = useState(false);
   const [polishOpen,  setPolishOpen]  = useState(false);
@@ -113,7 +114,6 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   const [selections,           setSelections]           = useState<Record<string, string[]>>(session.selections ?? {});
   const [generatedBullets,     setGeneratedBullets]     = useState<Record<string, GeneratedBullet>>({});
   const [customActivities,     setCustomActivities]     = useState<Activity[]>([]);
-  const [atsResume,            setAtsResume]            = useState<string>(session.ats_resume ?? "");
   const [finalResume,          setFinalResume]          = useState<string>(session.final_resume ?? "");
 
   // Track in-flight bullet generation so we can cancel if deselected
@@ -140,6 +140,9 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Queued build ref — the effect that fires it lives below generatingCount declaration
+  const buildQueuedRef = useRef(false);
+
   async function save(updates: Record<string, unknown>) {
     await supabase.from("pipeline_sessions").update(updates).eq("id", sessionId);
   }
@@ -156,9 +159,11 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     }));
 
     try {
+      // Strip vector embedding from payload — not needed for bullet gen, and ~30KB per activity
+      const { vector: _v, ...activityPayload } = activity;
       const result = await apiFetch<{ statement: string }>("/api/pipeline/generate-bullet", {
         rubric_item: rubricItem,
-        activity,
+        activity: activityPayload,
       });
       if (controller.signal.aborted) return;
       setGeneratedBullets((prev) => ({
@@ -484,14 +489,17 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   async function runAssembly(confirmedStatements: Statement[]) {
     setError(null);
     setAssemblingLog([
-      { id: "draft",  label: "Drafting ATS-optimized resume",  status: "running" },
-      { id: "polish", label: "Polishing final resume",          status: "waiting" },
+      { id: "draft",  label: "Drafting resume",               status: "running" },
+      { id: "polish", label: "Inserting missing ATS keywords", status: "waiting" },
     ]);
     setStage("assembling");
 
     try {
       const allActivities      = vectorizedActivities.length > 0 ? vectorizedActivities : activities;
-      const consolidatedSkills = [...new Set(allActivities.flatMap((a) => a.extracted_skills ?? []))];
+      // Fix 2: only include skills from activities the user actually selected
+      const selectedBulletIds  = new Set(confirmedStatements.map((s) => s.bullet_id));
+      const selectedActivities = allActivities.filter((a) => selectedBulletIds.has(a.bullet_id));
+      const consolidatedSkills = [...new Set(selectedActivities.flatMap((a) => a.extracted_skills ?? []))];
 
       const template = {
         name:           profile?.name           ?? "",
@@ -507,22 +515,24 @@ export default function PipelineRunner({ sessionId, session, activities, profile
         education,
       };
 
+      // Fix 3: pass all activities so roles without selected bullets still appear
+      const allActivitiesPayload = allActivities.map(({ vector: _v, ...rest }) => rest);
+
       const step6Result = await apiFetch<{ ats_resume: string; thinking?: string }>("/api/pipeline/step6", {
         template,
         statements:          confirmedStatements,
         role_context:        session.title ?? "",
         holistic_person:     intentRubric?.holistic_summary ?? "",
         consolidated_skills: consolidatedSkills,
+        all_activities:      allActivitiesPayload,
       });
 
       setLogStatus(setAssemblingLog, "draft",  "done",    step6Result.thinking ?? undefined);
       setLogStatus(setAssemblingLog, "polish", "running");
-      setAtsResume(step6Result.ats_resume);
 
       const step7Result = await apiFetch<{ final_resume: string; thinking?: string }>("/api/pipeline/step7", {
-        ats_resume:    step6Result.ats_resume,
-        intent_rubric: intentRubric,
-        ats_keywords:  atsRubric.flatMap((r) => r.ats_keywords),
+        ats_resume:   step6Result.ats_resume,
+        ats_keywords: atsRubric.flatMap((r) => r.ats_keywords),
       });
 
       setLogStatus(setAssemblingLog, "polish", "done", step7Result.thinking ?? undefined);
@@ -652,8 +662,8 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       });
       if (!result.ok) throw new Error(`Polish failed (${result.status})`);
       const data: { polished_text: string; thinking?: string } = await result.json();
-      if (resumeTab === "final") { setFinalResume(data.polished_text); save({ final_resume: data.polished_text }); }
-      else                       { setAtsResume(data.polished_text);   save({ ats_resume:   data.polished_text }); }
+      setFinalResume(data.polished_text);
+      save({ final_resume: data.polished_text });
       setPolishText("");
       setPolishOpen(false);
     } catch (err: unknown) {
@@ -667,10 +677,20 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
   const currentStepIdx = PIPELINE_STAGES.findIndex((s) => s.stages.includes(stage));
   const resumeName     = session.title || profile?.name || "resume";
-  const activeResume   = resumeTab === "final" ? finalResume : atsResume;
+  const activeResume   = finalResume;
 
   const generatingCount = Object.values(generatedBullets).filter((g) => g.generating).length;
   const readyCount      = Object.values(generatedBullets).filter((g) => g.statement && !g.generating).length;
+
+  // Fire queued build as soon as all bullets finish generating
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    if (buildQueuedRef.current && generatingCount === 0 && readyCount > 0) {
+      buildQueuedRef.current = false;
+      runAssemblyFromBullets();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generatingCount]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -772,6 +792,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
             onActivityToggle={handleActivityToggle}
             onCustomBullet={handleCustomBullet}
             onBuild={runAssemblyFromBullets}
+            onQueueBuild={() => { buildQueuedRef.current = true; }}
           />
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
         </div>
@@ -791,16 +812,8 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       {/* ── DONE ── */}
       {stage === "done" && (
         <div className="flex flex-col gap-4">
-          {/* Tab row + export buttons */}
+          {/* Export buttons */}
           <div className="flex items-center gap-2 flex-wrap" data-no-print>
-            <button onClick={() => setResumeTab("final")}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${resumeTab === "final" ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"}`}>
-              Final resume
-            </button>
-            <button onClick={() => setResumeTab("ats")}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${resumeTab === "ats" ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"}`}>
-              ATS version
-            </button>
             <span className="flex-1" />
             <button
               onClick={() => setPolishOpen((v) => !v)}
@@ -866,10 +879,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
 
           <ResumeEditor
             content={activeResume}
-            onChange={(text) => {
-              if (resumeTab === "final") { setFinalResume(text); save({ final_resume: text }); }
-              else                       { setAtsResume(text);   save({ ats_resume: text });   }
-            }}
+            onChange={(text) => { setFinalResume(text); save({ final_resume: text }); }}
           />
 
           <button

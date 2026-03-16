@@ -229,6 +229,7 @@ def step6_assemble_ats_resume(
     role_context: str = "",
     holistic_person: str = "",
     consolidated_skills: list[str] | None = None,
+    all_activities: list[dict] | None = None,
 ) -> tuple[str, str]:
     """Step 6: Assemble S-T-I statements into ATS-optimized resume.
 
@@ -241,17 +242,17 @@ def step6_assemble_ats_resume(
         role_context=role_context,
         holistic_person=holistic_person,
         consolidated_skills=consolidated_skills,
+        all_activities=all_activities,
     )
 
 
 def step7_intent_rewrite(
     ats_resume: str,
-    intent_rubric: IntentRubric,
     ats_keywords: list[str] | None = None,
 ) -> tuple[str, str]:
-    """Step 7: Rewrite resume to align with intent rubric.
+    """Step 7: Insert genuinely absent ATS keywords — no other changes.
 
     Returns:
-        (final_resume_text, thinking_text)
+        (resume_text, thinking_text)
     """
-    return intent_rewrite(ats_resume, intent_rubric, ats_keywords=ats_keywords)
+    return intent_rewrite(ats_resume, ats_keywords=ats_keywords)

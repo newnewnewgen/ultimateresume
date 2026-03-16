@@ -297,37 +297,28 @@ CRITICAL: The experience section MUST contain all role headers and bullets from 
 """
 
 INTENT_REWRITE = """\
-You are a precise resume editor. You have a resume that already passes ATS keyword
-matching. Your job is to make MINIMAL, SURGICAL edits to better align it with the
-hiring manager's true intent — without changing the voice, structure, or substance.
+You are a resume editor with ONE job: insert ATS keywords that are genuinely absent
+from the resume. You must NOT rephrase, restructure, improve, or change anything else.
 
-CURRENT ATS-OPTIMIZED RESUME:
+CURRENT RESUME:
 {ats_resume}
 
-ATS KEYWORD CHECKLIST (these must appear in the final resume — most already do):
+ATS KEYWORD CHECKLIST:
 {ats_keyword_checklist}
 
-INTENT SCORING RUBRIC:
-{intent_rubric}
+RULES — READ CAREFULLY:
+1. Identify keywords from the checklist that are COMPLETELY ABSENT — not present, not
+   implied, not paraphrased anywhere in the resume.
+2. For each genuinely absent keyword, insert it verbatim into ONE existing bullet where
+   it fits naturally. Prefer appending "(using X)" or adding to an existing tools list.
+3. Do NOT insert keywords that are already present, implied, or paraphrased in any way.
+4. Do NOT add new bullets, new sections, or new roles.
+5. Do NOT rephrase, restructure, or "improve" any existing text whatsoever.
+6. Do NOT inject soft skills, culture-fit language, or personality traits.
+7. Most bullets should be IDENTICAL to the input — copy them VERBATIM.
+8. If no keywords are absent, return the resume UNCHANGED.
 
-HOLISTIC IDEAL CANDIDATE:
-{holistic_summary}
-
-EDITING RULES — READ CAREFULLY:
-1. Make the SMALLEST possible change that achieves alignment. If a bullet already implies
-   something, do NOT add it explicitly — it is already there.
-2. Prefer single-word or short-phrase swaps over restructuring entire sentences.
-3. Do NOT expand bullet length significantly. If a bullet is one line, keep it one line.
-4. Do NOT add concepts, claims, or qualities that aren't in the original text. "Implied"
-   does not mean "missing" — leave implied things implied.
-5. Do NOT add flowery marketing language or abstract leadership claims (e.g., "embedded a
-   culture of...", "championed a vision of...") unless the original explicitly says so.
-6. For missing ATS keywords that genuinely aren't covered: insert them naturally into an
-   existing bullet where they fit — do not create new bullets or rewrite entire sections.
-7. Preserve the candidate's natural voice. The output should read like the same person wrote it.
-9. If a bullet is already well-aligned, copy it VERBATIM. Most bullets should be unchanged.
-
-Return the COMPLETE resume as formatted plain text, with only the minimal edits applied.
+Return the COMPLETE resume as formatted plain text.
 """
 
 POLISH_RESUME = """\

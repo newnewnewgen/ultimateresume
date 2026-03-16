@@ -430,6 +430,7 @@ def assemble_resume(
     role_context: str = "",
     holistic_person: str = "",
     consolidated_skills: list[str] | None = None,
+    all_activities: list[dict] | None = None,
 ) -> str:
     """Use AI to assemble S-T-I statements into a structured resume."""
     from collections import defaultdict
@@ -440,7 +441,7 @@ def assemble_resume(
     work_stmts    = [s for s in statements if s.get("entry_type", "work") not in PROJECT_TYPES]
     project_stmts = [s for s in statements if s.get("entry_type", "work") in PROJECT_TYPES]
 
-    def _build_history_block(stmts: list[dict]) -> str:
+    def _build_history_block(stmts: list[dict], fallback_acts: list[dict] | None = None) -> str:
         role_order: list[tuple] = []
         role_bullets: dict[tuple, list[str]] = defaultdict(list)
         for s in stmts:
@@ -450,6 +451,19 @@ def assemble_resume(
             if key not in role_bullets:
                 role_order.append(key)
             role_bullets[key].append(s["statement"])
+        # Include role headers from all activities even when no bullets were generated
+        if fallback_acts:
+            covered: set[tuple] = set(role_order)
+            for a in fallback_acts:
+                key = (
+                    a.get("job_title", ""),
+                    a.get("company", ""),
+                    a.get("dates_worked", ""),
+                    a.get("location", ""),
+                )
+                if key[0] and key not in covered:
+                    role_order.append(key)
+                    covered.add(key)
         block = ""
         for job_title, company, dates, location in role_order:
             block += f"\n{job_title} | {company} | {dates} | {location}\n"
@@ -457,8 +471,11 @@ def assemble_resume(
                 block += f"  • {bullet}\n"
         return block.strip() or "  None"
 
-    work_history_block    = _build_history_block(work_stmts)
-    project_history_block = _build_history_block(project_stmts)
+    all_work_acts    = [a for a in (all_activities or []) if a.get("entry_type", "work") not in PROJECT_TYPES]
+    all_project_acts = [a for a in (all_activities or []) if a.get("entry_type", "work")     in PROJECT_TYPES]
+
+    work_history_block    = _build_history_block(work_stmts,    all_work_acts    or None)
+    project_history_block = _build_history_block(project_stmts, all_project_acts or None)
 
     # Skills: deduplicate, then pass a capped list so the AI can pick the best ones
     raw_skills = consolidated_skills or template.skills or []
@@ -516,24 +533,15 @@ def assemble_resume(
 
 def intent_rewrite(
     ats_resume: str,
-    intent_rubric: IntentRubric,
     ats_keywords: list[str] | None = None,
 ) -> str:
-    """Use AI to rewrite the ATS resume to align with intent rubric."""
-    rubric_text = ""
-    for item in intent_rubric.items:
-        rubric_text += (
-            f"  [{item.category}] (weight: {item.weight}): {item.description}\n"
-        )
-
+    """Insert genuinely absent ATS keywords into the resume — no other changes."""
     keyword_checklist = "  (no checklist provided)"
     if ats_keywords:
         keyword_checklist = ", ".join(sorted(set(ats_keywords)))
 
     prompt = INTENT_REWRITE.format(
         ats_resume=ats_resume,
-        intent_rubric=rubric_text,
-        holistic_summary=intent_rubric.holistic_summary,
         ats_keyword_checklist=keyword_checklist,
     )
     text, thinking = _call_gemini_with_thinking(prompt, max_output_tokens=8192, use_pro=True, thinking_budget=2048)

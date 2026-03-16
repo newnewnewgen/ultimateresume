@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from core.models import (
@@ -183,6 +184,7 @@ class Step6Request(BaseModel):
     role_context: str = ""
     holistic_person: str = ""
     consolidated_skills: list[str] = []
+    all_activities: list[dict] = []
 
 
 class Step6Response(BaseModel):
@@ -192,7 +194,6 @@ class Step6Response(BaseModel):
 
 class Step7Request(BaseModel):
     ats_resume: str
-    intent_rubric: IntentRubricOut
     ats_keywords: list[str] = []
 
 
@@ -432,6 +433,7 @@ async def step6(req: Step6Request):
             role_context=req.role_context,
             holistic_person=req.holistic_person,
             consolidated_skills=req.consolidated_skills or None,
+            all_activities=req.all_activities or None,
         )
         return Step6Response(ats_resume=ats_resume, thinking=thinking)
     except Exception as exc:
@@ -440,12 +442,10 @@ async def step6(req: Step6Request):
 
 @router.post("/step7", response_model=Step7Response)
 async def step7(req: Step7Request):
-    """Rewrite the ATS resume to align with intent rubric."""
+    """Insert missing ATS keywords into the resume."""
     try:
-        intent_rubric = _to_intent_rubric(req.intent_rubric)
         final, thinking = step7_intent_rewrite(
             ats_resume=req.ats_resume,
-            intent_rubric=intent_rubric,
             ats_keywords=req.ats_keywords or None,
         )
         return Step7Response(final_resume=final, thinking=thinking)
@@ -466,9 +466,10 @@ class GenerateBulletResponse(BaseModel):
 async def generate_bullet(req: GenerateBulletRequest):
     """Generate a single resume bullet using Pro Gemini for a matched activity/rubric pair."""
     try:
-        rubric = _to_ats_rubric_item(req.rubric_item)
-        activity = _to_activity_bullet(req.activity)
-        statement = generate_single_bullet(rubric, activity)
+        rubric    = _to_ats_rubric_item(req.rubric_item)
+        activity  = _to_activity_bullet(req.activity)
+        # Run the synchronous blocking Gemini call in a thread so it doesn't stall the event loop
+        statement = await run_in_threadpool(generate_single_bullet, rubric, activity)
         return GenerateBulletResponse(statement=statement)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc

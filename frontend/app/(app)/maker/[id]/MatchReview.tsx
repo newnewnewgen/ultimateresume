@@ -40,6 +40,7 @@ interface Props {
   onActivityToggle: (rubricId: string, bulletId: string, activity: Activity, selected: boolean) => void;
   onCustomBullet:   (rubricId: string, bulletId: string, draft: ActivityDraft) => void;
   onBuild:          () => void;
+  onQueueBuild:     () => void; // build as soon as current generation finishes
 }
 
 function HighlightText({ text, keywords }: { text: string; keywords: string[] }) {
@@ -211,12 +212,10 @@ function AddActivityForm({
 /** Confirmation modal shown when user tries to build with unmet requirements */
 function BuildConfirmModal({
   unmatchedItems,
-  generatingCount,
   onConfirm,
   onCancel,
 }: {
   unmatchedItems: ATSRubricItem[];
-  generatingCount: number;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -224,40 +223,28 @@ function BuildConfirmModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-xl border border-zinc-200 w-full max-w-md p-6 flex flex-col gap-4">
         <div>
-          <h2 className="text-base font-semibold text-zinc-900 mb-1">
-            {generatingCount > 0 ? "Bullets still generating" : "Some requirements unmatched"}
-          </h2>
+          <h2 className="text-base font-semibold text-zinc-900 mb-1">Some requirements unmatched</h2>
           <p className="text-sm text-zinc-500">
-            {generatingCount > 0
-              ? `${generatingCount} bullet${generatingCount !== 1 ? "s are" : " is"} still being generated. Building now will skip them.`
-              : "The following requirements have no activities selected — the resume may be weaker without them."}
+            The following requirements have no activities selected — the resume may be weaker without them.
           </p>
         </div>
 
-        {unmatchedItems.length > 0 && generatingCount === 0 && (
-          <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
-            {unmatchedItems.map((r) => (
-              <div key={r.rubric_id} className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
-                <span className={`rounded-md px-1.5 py-0.5 text-xs font-medium shrink-0 ${PRIORITY_COLORS[r.priority] ?? PRIORITY_COLORS.nice_to_have}`}>
-                  {PRIORITY_LABELS[r.priority] ?? r.priority}
-                </span>
-                <p className="text-xs text-zinc-700 leading-snug">{r.item}</p>
-              </div>
-            ))}
-          </div>
-        )}
+        <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+          {unmatchedItems.map((r) => (
+            <div key={r.rubric_id} className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
+              <span className={`rounded-md px-1.5 py-0.5 text-xs font-medium shrink-0 ${PRIORITY_COLORS[r.priority] ?? PRIORITY_COLORS.nice_to_have}`}>
+                {PRIORITY_LABELS[r.priority] ?? r.priority}
+              </span>
+              <p className="text-xs text-zinc-700 leading-snug">{r.item}</p>
+            </div>
+          ))}
+        </div>
 
         <div className="flex gap-2 pt-1">
-          <button
-            onClick={onCancel}
-            className="flex-1 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
-          >
-            {unmatchedItems.length > 0 && generatingCount === 0 ? "Review requirements" : "Wait for generation"}
+          <button onClick={onCancel} className="flex-1 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors">
+            Review requirements
           </button>
-          <button
-            onClick={onConfirm}
-            className="flex-1 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 transition-colors"
-          >
+          <button onClick={onConfirm} className="flex-1 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 transition-colors">
             Build anyway →
           </button>
         </div>
@@ -269,20 +256,27 @@ function BuildConfirmModal({
 export default function MatchReview({
   atsRubric, knockoutItems: _knockoutItems, matches, activities, selections,
   generatedBullets, generatingCount, buildDisabled,
-  onActivityToggle, onCustomBullet, onBuild,
+  onActivityToggle, onCustomBullet, onBuild, onQueueBuild,
 }: Props) {
   const allSelectedIds = new Set(Object.values(selections).flat());
   const uniqueCount    = allSelectedIds.size;
 
   const activityById = Object.fromEntries(activities.map((a) => [a.bullet_id, a]));
 
-  // Sort: items without pre-selections first (need attention), then with
-  const sorted = [...atsRubric].sort((a, b) => {
-    const aHas = (selections[a.rubric_id] ?? []).length > 0;
-    const bHas = (selections[b.rubric_id] ?? []).length > 0;
-    if (aHas !== bHas) return aHas ? 1 : -1;
-    return PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority);
-  });
+  // Stable sort — computed once on mount so panels never jump when selections change
+  const [stableSortedIds] = useState<string[]>(() =>
+    [...atsRubric]
+      .sort((a, b) => {
+        const aHas = (selections[a.rubric_id] ?? []).length > 0;
+        const bHas = (selections[b.rubric_id] ?? []).length > 0;
+        if (aHas !== bHas) return aHas ? 1 : -1;
+        return PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority);
+      })
+      .map((r) => r.rubric_id)
+  );
+  const sorted = stableSortedIds
+    .map((id) => atsRubric.find((r) => r.rubric_id === id))
+    .filter((r): r is ATSRubricItem => r !== undefined);
 
   const completedCount  = sorted.filter((r) => (selections[r.rubric_id] ?? []).length > 0).length;
   const unmatchedItems  = sorted.filter((r) => (selections[r.rubric_id] ?? []).length === 0);
@@ -351,8 +345,11 @@ export default function MatchReview({
   }
 
   function handleBuildClick() {
-    // Show confirmation if requirements unmet OR bullets still generating
-    if (unmatchedItems.length > 0 || generatingCount > 0) {
+    if (generatingCount > 0) {
+      // Queue: build automatically when generation finishes — no modal needed
+      onQueueBuild();
+    } else if (unmatchedItems.length > 0) {
+      // Warn about unmet requirements
       setShowConfirm(true);
     } else {
       onBuild();
@@ -383,7 +380,6 @@ export default function MatchReview({
       {showConfirm && (
         <BuildConfirmModal
           unmatchedItems={unmatchedItems}
-          generatingCount={generatingCount}
           onConfirm={() => { setShowConfirm(false); onBuild(); }}
           onCancel={() => setShowConfirm(false)}
         />
