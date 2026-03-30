@@ -1,5 +1,7 @@
 """Ingest endpoints — parse uploaded resume or activity bank files."""
 
+import asyncio
+
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
@@ -117,7 +119,7 @@ async def parse_resume(file: UploadFile = File(...)):
         raise HTTPException(400, "No filename provided")
     contents = await file.read()
     try:
-        profile, activities, _style_notes = parse_full_resume(contents, file.filename)
+        profile, activities, _style_notes = await asyncio.to_thread(parse_full_resume, contents, file.filename)
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
     return ParseResumeResponse(

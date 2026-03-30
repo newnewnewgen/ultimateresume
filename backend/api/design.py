@@ -1,5 +1,6 @@
 """Design endpoints — LaTeX template generation, resume assembly, and export."""
 
+import asyncio
 import io
 import re
 
@@ -65,7 +66,8 @@ class AssembleLatexResponse(BaseModel):
 async def generate_template(req: GenerateTemplateRequest):
     """Generate a LaTeX resume template with lorem ipsum from a style description."""
     try:
-        latex = generate_latex_template(
+        latex = await asyncio.to_thread(
+            generate_latex_template,
             style_spec=req.style_spec,
             profile=req.profile.model_dump(),
             sections=req.sections,
@@ -79,7 +81,7 @@ async def generate_template(req: GenerateTemplateRequest):
 async def edit_template(req: EditTemplateRequest):
     """Apply a natural-language instruction to edit a LaTeX template."""
     try:
-        latex = edit_latex_with_ai(req.latex, req.instruction)
+        latex = await asyncio.to_thread(edit_latex_with_ai, req.latex, req.instruction)
         return EditTemplateResponse(latex=latex)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
@@ -89,7 +91,8 @@ async def edit_template(req: EditTemplateRequest):
 async def assemble_latex(req: AssembleLatexRequest):
     """Replace lorem ipsum in a LaTeX template with real resume content."""
     try:
-        latex = assemble_latex_resume(
+        latex = await asyncio.to_thread(
+            assemble_latex_resume,
             latex_template=req.latex_template,
             resume_text=req.resume_text,
             profile=req.profile.model_dump(),
@@ -191,7 +194,7 @@ def _build_docx(resume_text: str) -> bytes:
 async def export_docx(req: ExportDocxRequest):
     """Convert plain-text resume to a formatted DOCX and return for download."""
     try:
-        docx_bytes = _build_docx(req.resume_text)
+        docx_bytes = await asyncio.to_thread(_build_docx, req.resume_text)
         filename = re.sub(r"[^a-zA-Z0-9_-]", "_", req.name or "resume") + ".docx"
         return StreamingResponse(
             io.BytesIO(docx_bytes),

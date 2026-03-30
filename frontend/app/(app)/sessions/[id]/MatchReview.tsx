@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback, memo } from "react";
 import type { Activity, ATSRubricItem, VectorMatch } from "@/lib/api/types";
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -73,7 +73,7 @@ function ScorePill({ score }: { score: number }) {
   );
 }
 
-function ActivityCard({
+const ActivityCard = memo(function ActivityCard({
   activity, score, selected, keywords, onToggle,
 }: {
   activity: Activity; score: number; selected: boolean; keywords: string[]; onToggle: () => void;
@@ -130,7 +130,7 @@ function ActivityCard({
       </div>
     </div>
   );
-}
+});
 
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
@@ -213,13 +213,13 @@ function AddActivityForm({
   );
 }
 
-export default function MatchReview({ atsRubric, matches, activities, selections, onSelectionsChange, onCustomBullet }: Props) {
+export default memo(function MatchReview({ atsRubric, matches, activities, selections, onSelectionsChange, onCustomBullet }: Props) {
   const [currentIdx,     setCurrentIdx]     = useState(0);
   const [customDrafts,   setCustomDrafts]   = useState<Record<string, ActivityDraft>>({});
   const [showCustomForm, setShowCustomForm] = useState<Record<string, boolean>>({});
 
-  const activityById = Object.fromEntries(activities.map((a) => [a.bullet_id, a]));
-  const sorted = [...atsRubric].sort((a, b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority));
+  const activityById = useMemo(() => Object.fromEntries(activities.map((a) => [a.bullet_id, a])), [activities]);
+  const sorted = useMemo(() => [...atsRubric].sort((a, b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority)), [atsRubric]);
 
   const item = sorted[currentIdx];
   if (!item) return null;
@@ -429,4 +429,4 @@ export default function MatchReview({ atsRubric, matches, activities, selections
       </div>
     </div>
   );
-}
+});

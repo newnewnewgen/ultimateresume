@@ -4,7 +4,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
-import { useEffect } from "react";
+import { useEffect, useRef, memo } from "react";
 
 // ── Plain-text → HTML ─────────────────────────────────────────────────────────
 
@@ -105,7 +105,10 @@ interface Props {
   readOnly?: boolean;
 }
 
-export default function ResumeEditor({ content, onChange, readOnly = false }: Props) {
+export default memo(function ResumeEditor({ content, onChange, readOnly = false }: Props) {
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -120,7 +123,7 @@ export default function ResumeEditor({ content, onChange, readOnly = false }: Pr
       },
     },
     onUpdate({ editor }) {
-      onChange?.(htmlToResumeText(editor.getHTML()));
+      onChangeRef.current?.(htmlToResumeText(editor.getHTML()));
     },
   });
 
@@ -177,4 +180,4 @@ export default function ResumeEditor({ content, onChange, readOnly = false }: Pr
       </div>
     </div>
   );
-}
+});

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -264,7 +266,7 @@ async def step1(req: Step1Request):
     """Extract skills and vectorize the activity bank."""
     try:
         activities = [_to_activity_bullet(a) for a in req.activities]
-        result = step1_ingest_and_vectorize(activities)
+        result = await asyncio.to_thread(step1_ingest_and_vectorize, activities)
         return Step1Response(activities=[_activity_out(a) for a in result])
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
@@ -274,7 +276,7 @@ async def step1(req: Step1Request):
 async def step2(req: Step2Request):
     """Clean and structure a raw job description."""
     try:
-        cleaned = step2_analyze_job_description(req.job_description)
+        cleaned = await asyncio.to_thread(step2_analyze_job_description, req.job_description)
         return Step2Response(
             required_skills=cleaned.required_skills,
             nice_to_have_skills=cleaned.nice_to_have_skills,
@@ -296,7 +298,7 @@ async def step3(req: Step3Request):
             valued_qualities=req.valued_qualities,
             holistic_person_definition=req.holistic_person_definition,
         )
-        ats_rubric, intent_rubric = step3_create_rubrics(cleaned)
+        ats_rubric, intent_rubric = await asyncio.to_thread(step3_create_rubrics, cleaned)
         return Step3Response(
             ats_rubric=[_ats_rubric_item_out(r) for r in ats_rubric],
             intent_rubric=IntentRubricOut(
@@ -322,7 +324,7 @@ async def step4(req: Step4Request):
     try:
         ats_rubric = [_to_ats_rubric_item(r) for r in req.ats_rubric]
         activities = [_to_activity_bullet(a) for a in req.activities]
-        ats_rubric, matches = step4_vectorize_and_match(ats_rubric, activities, req.top_k)
+        ats_rubric, matches = await asyncio.to_thread(step4_vectorize_and_match, ats_rubric, activities, req.top_k)
 
         matches_out: dict[str, list[VectorMatchOut]] = {}
         for rubric_id, vm_list in matches.items():
@@ -351,7 +353,8 @@ async def step5(req: Step5Request):
         activities = [_to_activity_bullet(a) for a in req.activities]
         activities_by_id = {a.bullet_id: a for a in activities}
 
-        results = step5_generate_statements(
+        results = await asyncio.to_thread(
+            step5_generate_statements,
             ats_rubric=ats_rubric,
             activities_by_id=activities_by_id,
             selections=req.selections,
@@ -396,7 +399,8 @@ async def step6(req: Step6Request):
         # Convert StatementOut back to plain dicts for the pipeline function
         statements = [s.model_dump() for s in req.statements]
 
-        ats_resume = step6_assemble_ats_resume(
+        ats_resume = await asyncio.to_thread(
+            step6_assemble_ats_resume,
             template=template,
             statements=statements,
             role_context=req.role_context,
@@ -413,7 +417,8 @@ async def step7(req: Step7Request):
     """Rewrite the ATS resume to align with intent rubric."""
     try:
         intent_rubric = _to_intent_rubric(req.intent_rubric)
-        final = step7_intent_rewrite(
+        final = await asyncio.to_thread(
+            step7_intent_rewrite,
             ats_resume=req.ats_resume,
             intent_rubric=intent_rubric,
             ats_keywords=req.ats_keywords or None,

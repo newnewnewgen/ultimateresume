@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import type { ATSRubricItem } from "@/lib/api/types";
 
 const PRIORITY_OPTS = [
@@ -143,7 +143,7 @@ function RubricItemCard({
 
 let _nextId = 1;
 
-export default function RubricEditor({ rubric: initialRubric, onConfirm }: Props) {
+export default memo(function RubricEditor({ rubric: initialRubric, onConfirm }: Props) {
   const [items, setItems] = useState<ATSRubricItem[]>(initialRubric);
 
   function update(index: number, updated: ATSRubricItem) {
@@ -217,4 +217,4 @@ export default function RubricEditor({ rubric: initialRubric, onConfirm }: Props
       </div>
     </div>
   );
-}
+});

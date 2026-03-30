@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import type { Statement } from "@/lib/api/types";
 
 interface Props {
@@ -8,7 +8,7 @@ interface Props {
   onConfirm: (statements: Statement[]) => void;
 }
 
-function BulletCard({
+const BulletCard = memo(function BulletCard({
   statement, deleted, onToggleDelete, onEdit,
 }: {
   statement: Statement; deleted: boolean;
@@ -86,9 +86,9 @@ function BulletCard({
       )}
     </div>
   );
-}
+});
 
-export default function BulletEditor({ statements, onConfirm }: Props) {
+export default memo(function BulletEditor({ statements, onConfirm }: Props) {
   const [items,   setItems]   = useState<Statement[]>(statements);
   const [deleted, setDeleted] = useState<Set<string>>(new Set());
 
@@ -143,4 +143,4 @@ export default function BulletEditor({ statements, onConfirm }: Props) {
       </div>
     </div>
   );
-}
+});

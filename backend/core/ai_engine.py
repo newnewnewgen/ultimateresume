@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
+from functools import lru_cache
 from typing import Any
 
 from google import genai
@@ -42,8 +44,9 @@ GEMINI_FLASH = "gemini-2.5-flash"
 GEMINI_PRO = "gemini-2.5-pro"
 
 
+@lru_cache(maxsize=1)
 def _get_client() -> genai.Client:
-    """Return a configured Gemini client."""
+    """Return a cached Gemini client (one per process)."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise EnvironmentError("GEMINI_API_KEY or GOOGLE_API_KEY environment variable is not set.")
@@ -119,7 +122,7 @@ def _call_gemini(
             except genai_errors.ServerError as e:
                 last_error = e
                 if attempt < max_retries - 1:
-                    wait = 10 * (2 ** attempt)  # 10s, 20s, 40s
+                    wait = 2 * (2 ** attempt)  # 2s, 4s, 8s
                     time.sleep(wait)
                 # else: fall through to next model or raise
             except Exception:

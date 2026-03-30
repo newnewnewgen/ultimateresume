@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import MatchReview from "./MatchReview";
 import RubricEditor from "./RubricEditor";
@@ -71,7 +71,8 @@ const PIPELINE_STAGES: { label: string; stages: Stage[] }[] = [
 ];
 
 export default function PipelineRunner({ sessionId, session, activities, profile }: Props) {
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
   const [stage, setStage] = useState<Stage>(() => {
     if (session.final_resume || session.ats_resume) return "done";
@@ -104,9 +105,16 @@ export default function PipelineRunner({ sessionId, session, activities, profile
     await supabase.from("pipeline_sessions").update(updates).eq("id", sessionId);
   }
 
+  // ── Memoized callbacks ───────────────────────────────────────────────────────
+
+  const handleSelectionsChange = useCallback((s: Record<string, string[]>) => {
+    setSelections(s);
+    save({ selections: s });
+  }, [sessionId]);
+
   // ── Custom activity handler ──────────────────────────────────────────────────
 
-  function handleCustomBullet(rubricId: string, bulletId: string, draft: { job_title: string; company: string; dates_worked: string; location: string; situation: string; action: string; impact: string }) {
+  const handleCustomBullet = useCallback((rubricId: string, bulletId: string, draft: { job_title: string; company: string; dates_worked: string; location: string; situation: string; action: string; impact: string }) => {
     const activity: Activity = {
       bullet_id:        bulletId,
       entry_type:       "work",
@@ -123,7 +131,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
       const filtered = prev.filter((a) => !a.bullet_id.startsWith(`custom_${rubricId}`));
       return [...filtered, activity];
     });
-  }
+  }, []);
 
   // ── Step 1+2+3: Analyze ──────────────────────────────────────────────────
 
@@ -402,6 +410,7 @@ export default function PipelineRunner({ sessionId, session, activities, profile
   const currentStepIdx = PIPELINE_STAGES.findIndex((s) => s.stages.includes(stage));
   const resumeName     = session.title || profile?.name || "resume";
   const activeResume   = resumeTab === "final" ? finalResume : atsResume;
+  const allActivities  = useMemo(() => [...activities, ...customActivities], [activities, customActivities]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -504,9 +513,9 @@ export default function PipelineRunner({ sessionId, session, activities, profile
           <MatchReview
             atsRubric={atsRubric}
             matches={matches}
-            activities={[...activities, ...customActivities]}
+            activities={allActivities}
             selections={selections}
-            onSelectionsChange={(s) => { setSelections(s); save({ selections: s }); }}
+            onSelectionsChange={handleSelectionsChange}
             onCustomBullet={handleCustomBullet}
           />
 

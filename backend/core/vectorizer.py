@@ -6,9 +6,12 @@ combined with keyword overlap scoring for accurate skill matching.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 from collections import Counter
+from functools import lru_cache
 
 import numpy as np
 from google import genai
@@ -25,35 +28,64 @@ SEMANTIC_WEIGHT = 0.55   # Gemini embedding cosine similarity
 KEYWORD_WEIGHT = 0.30    # Exact keyword / phrase overlap
 CONTEXT_WEIGHT = 0.15    # Job-title / domain context bonus
 
+# Simple in-memory embedding cache (key = hash of text + task_type)
+_embedding_cache: dict[str, list[float]] = {}
 
+
+@lru_cache(maxsize=1)
 def _get_client() -> genai.Client:
-    """Return a configured Gemini client."""
+    """Return a cached Gemini client (one per process)."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise EnvironmentError("GEMINI_API_KEY or GOOGLE_API_KEY environment variable is not set.")
     return genai.Client(api_key=api_key)
 
 
+def _cache_key(text: str, task_type: str) -> str:
+    return hashlib.md5(f"{task_type}:{text}".encode()).hexdigest()
+
+
 def embed_texts_gemini(texts: list[str], task_type: str = "SEMANTIC_SIMILARITY") -> list[list[float]]:
-    """Embed texts using Gemini gemini-embedding-004.
+    """Embed texts using Gemini gemini-embedding-004 with caching.
 
     Args:
         texts: List of strings to embed.
         task_type: One of SEMANTIC_SIMILARITY, RETRIEVAL_DOCUMENT, RETRIEVAL_QUERY,
                    CLASSIFICATION, CLUSTERING.
     """
+    # Check cache first, collect uncached texts
+    results: list[list[float] | None] = [None] * len(texts)
+    uncached: list[tuple[int, str]] = []
+    for i, text in enumerate(texts):
+        key = _cache_key(text, task_type)
+        if key in _embedding_cache:
+            results[i] = _embedding_cache[key]
+        else:
+            uncached.append((i, text))
+
+    if not uncached:
+        return results  # type: ignore[return-value]
+
+    # Embed only uncached texts
     client = _get_client()
-    # Gemini embedding API accepts batches up to 100
-    all_vectors = []
-    for i in range(0, len(texts), 100):
-        batch = texts[i:i + 100]
+    uncached_texts = [t for _, t in uncached]
+    all_vectors: list[list[float]] = []
+    for i in range(0, len(uncached_texts), 100):
+        batch = uncached_texts[i:i + 100]
         result = client.models.embed_content(
             model=EMBEDDING_MODEL,
             contents=batch,
             config=genai_types.EmbedContentConfig(task_type=task_type),
         )
         all_vectors.extend([e.values for e in result.embeddings])
-    return all_vectors
+
+    # Store in cache and fill results
+    for (orig_idx, text), vector in zip(uncached, all_vectors):
+        key = _cache_key(text, task_type)
+        _embedding_cache[key] = vector
+        results[orig_idx] = vector
+
+    return results  # type: ignore[return-value]
 
 
 # ── Structured Text Builders ─────────────────────────────────────────────────
