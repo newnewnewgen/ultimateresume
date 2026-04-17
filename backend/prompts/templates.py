@@ -194,11 +194,8 @@ You are an expert resume formatter. Your job is to arrange pre-written content i
 complete, professional resume. You are a FORMATTER, not a writer — do not invent
 any new bullets, job titles, companies, or accomplishments.
 
-TARGET ROLE CONTEXT:
+TARGET ROLE CONTEXT (for skills ordering only):
   {role_context}
-
-IDEAL CANDIDATE PROFILE (use only for the summary section):
-  {holistic_person}
 
 TEMPLATE STRUCTURE:
   Name: {name}
@@ -220,18 +217,33 @@ bullets not listed here. Each role and its bullets are final.
 {work_history_block}
 ═══════════════════════════════════════════════════════════
 
+═══════════════════════════════════════════════════════════
+PRE-GROUPED PROJECT HISTORY — COPY THESE BULLETS VERBATIM
+Same rules: no rewrites, no additions.
+═══════════════════════════════════════════════════════════
+{project_history_block}
+═══════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════
+PRE-GROUPED VOLUNTEER HISTORY — COPY THESE BULLETS VERBATIM
+Same rules: no rewrites, no additions.
+═══════════════════════════════════════════════════════════
+{volunteer_history_block}
+═══════════════════════════════════════════════════════════
+
 FORMATTING RULES:
-1. Output the experience section using EXACTLY the roles and bullets above — no additions, no omissions, no rewording
-2. Order sections to match: {sections}
-3. Order jobs reverse-chronologically (most recent first)
-4. For the skills section, organize the consolidated skills into logical categories (Languages, Frameworks, Tools, Methodologies)
-5. Order skills to lead with those most relevant to the target role
-6. If the template includes a summary/objective section, write a concise 2-3 sentence professional summary using the target role context and ideal candidate profile above
-7. Do NOT fabricate any content outside of the summary — all experience bullets come from the pre-grouped block above
+1. Output the experience section using EXACTLY the roles and bullets from WORK HISTORY — no additions, no omissions, no rewording
+2. Output the projects section using EXACTLY the entries from PROJECT HISTORY — same rules
+3. Output the volunteer section using EXACTLY the entries from VOLUNTEER HISTORY — same rules
+4. Order sections to match: {sections}
+5. Order jobs/projects/volunteer roles reverse-chronologically (most recent first)
+6. For skills: select the most relevant hard technical skills from CONSOLIDATED SKILLS; group into at most 4 categories (e.g. Languages, Frameworks, Tools, Cloud/Infra); max 6-8 per category; omit generic soft skills
+7. Do NOT fabricate any content — all bullets come from the pre-grouped blocks above
+8. OMIT any section entirely (no header, no blank line) if it has no content to show
 
 Return the resume as clean, formatted plain text ready for a document.
 
-Use EXACTLY this structure — replace each [placeholder] with real content:
+Use EXACTLY this structure:
 
 {name}
 {location} | {email} | {phone}
@@ -239,15 +251,15 @@ Use EXACTLY this structure — replace each [placeholder] with real content:
 
 For each section in [{sections}], output a section header in ALL CAPS followed by its content:
 
-- summary → Write a 2-3 sentence professional summary using the role context and ideal candidate profile.
-- experience → Copy EVERY role and bullet from the PRE-GROUPED WORK HISTORY block above, verbatim. Do not skip any bullet. Do not reword. Paste them exactly.
-- education → Output the section header. Leave the content blank (the user will fill it in).
-- projects → Output the section header. Leave the content blank (the user will fill it in).
-- skills → Organize the consolidated skills into logical categories (Languages, Frameworks, Tools, Methodologies). Order by relevance to the target role.
-- certifications → Output the section header. Leave the content blank (the user will fill it in).
-- For any other section → Output the section header and leave the content blank.
+- summary → OMIT entirely. Do not write a summary under any circumstances.
+- experience → Copy EVERY role and bullet from WORK HISTORY, verbatim. If WORK HISTORY is "None", OMIT this section.
+- projects → Copy EVERY entry and bullet from PROJECT HISTORY, verbatim. If PROJECT HISTORY is "None", OMIT this section (no header).
+- volunteer → Copy EVERY role and bullet from VOLUNTEER HISTORY, verbatim. If VOLUNTEER HISTORY is "None", OMIT this section (no header).
+- education → Output the section header only (user fills in content).
+- skills → Organize hard skills from CONSOLIDATED SKILLS (max 4 categories, max 6-8 per category). If empty, OMIT this section.
+- For any other section → OMIT (output nothing).
 
-CRITICAL: The experience section MUST contain all the role headers and bullet points from the PRE-GROUPED WORK HISTORY block. Do not output an empty experience section.
+CRITICAL: The experience section MUST contain all role headers and bullets from WORK HISTORY. Do not output an empty experience section.
 """
 
 INTENT_REWRITE = """\

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Resume Writer",
-  description: "AI-powered resume tailoring for every job application",
+  title: "RAGResume",
+  description: "The most technical way to custom-craft resumes to pass ATS and recruiters' eyes.",
 };
 
 export default function RootLayout({

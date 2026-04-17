@@ -4,7 +4,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold text-zinc-900 tracking-tight">
-            AI Resume Writer
+            RAGResume
           </h1>
         </div>
         <div className="bg-white rounded-2xl shadow-sm border border-zinc-200 p-8">
