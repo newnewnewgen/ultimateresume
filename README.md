@@ -1,6 +1,6 @@
-# AI Resume Writer
+# RAGResume
 
-An expert AI-powered resume generation pipeline that produces resumes optimized for both ATS (Applicant Tracking Systems) and hiring manager intent.
+RAGResume is an expert AI-powered resume generation pipeline that produces resumes optimized for both ATS (Applicant Tracking Systems) and hiring manager intent.
 
 ## How It Works
 
