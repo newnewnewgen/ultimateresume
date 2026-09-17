@@ -1,5 +1,16 @@
 # RAGResume
 
+> ## ⚠️ SUNSET — archived 2026-09-17
+>
+> **This project is no longer maintained and is superseded by a full rebuild.**
+>
+> It is retained for reference only. Do not build on this codebase: it contains two
+> diverged implementations of the same pipeline, has no test coverage, and does not
+> persist user data between runs.
+>
+> **See [POSTMORTEM.md](POSTMORTEM.md)** for what failed, what worked, and what carries
+> forward into the rebuild.
+
 RAGResume is an expert AI-powered resume generation pipeline that produces resumes optimized for both ATS (Applicant Tracking Systems) and hiring manager intent.
 
 ## How It Works
