@@ -31,6 +31,8 @@ templates, 24 LLM call sites, 0 tests.
 | Tracked files that are build artifacts | 53 of 145 (37%) |
 | Commits whose message is pasted `git status` output | 9 of 45 |
 | Times the same truncation bug was "fixed" | 5 |
+| Commits touching UI / design / deploy | **24 of 46 (52%)** |
+| Explicit redesigns of already-built UI | 5 |
 
 ---
 
@@ -191,6 +193,46 @@ bullet, and every approval is discarded.** For a tool whose entire value proposi
 tailoring one resume per application, that is close to fatal. The most expensive input in
 the system — human judgment — was the only input treated as disposable.
 
+### 11. A full interface was built before the fundamentals held — and the design was bad anyway
+
+This is the author's own assessment, and the commit history backs it:
+
+- **24 of 46 commits (52%)** touched UI, design, or deployment
+- **5 were redesigns of UI that already existed** — `Redesign match review`,
+  `Redesign dashboard`, `redesign Designer with WYSIWYG element cards`,
+  `visual revamp, animated greeting with splash text`, `Redesign pipeline`
+- **6,781 lines of TSX across 35 components** — a designer page, a dashboard with an
+  animated greeting, auth flows, a WYSIWYG element editor, five review surfaces
+
+All of it built on a pipeline with **zero tests and two diverged implementations**.
+
+Two distinct mistakes compounded here.
+
+**The sequencing was backwards.** The interface froze a pipeline shape that was still
+wrong. `/step1…/step7` became load-bearing in the URL space (failure #7). Five separate
+review surfaces hardened before there was any shared model of a user decision (failure
+#10). Embedding vectors got written into the TypeScript types (failure #8), which made the
+browser a mandatory participant in the data flow. Each of those is now a *frontend* change
+to fix, not just a backend one. Building the UI early didn't just fail to help — it
+actively raised the cost of correcting the things underneath it.
+
+**And the design wasn't good.** Five redesigns of the same surfaces is the tell: the effort
+didn't converge. Half the project's commits went into presentation, and the result was
+still not a UI worth keeping. So the premature investment didn't even buy the thing it was
+traded for.
+
+The honest read: UI work is legible and produces visible progress, while test harnesses and
+persistence layers don't. Under that gradient the project optimized for the appearance of
+momentum. Half the commits produced something that now has to be thrown away in full,
+and — because of the coupling above — it has to be thrown away *before* the engine can be
+fixed.
+
+**The learning is a sequencing rule, not a taste problem.** Do not build a presentation
+layer on top of an engine you cannot yet test. Until the pipeline has an eval harness and
+persistent state, any interface is a guess being cast in a form that is expensive to
+un-guess. A CLI or the crudest possible harness is the correct interface for that phase,
+precisely because it costs nothing to discard.
+
 ---
 
 ## What worked, and should survive the rebuild
@@ -227,6 +269,15 @@ Not everything here was wrong. These held up:
 ---
 
 ## Learnings for the rebuild
+
+> **The precondition, which governs everything below: no presentation layer until the
+> engine is testable and stateful.**
+>
+> Half of this project's commits went into an interface built on an untestable engine, and
+> that interface then hardened the engine's worst mistakes into the URL space, the wire
+> format and the TypeScript types. Ship a CLI or a bare harness until the eval set passes
+> and the activity bank persists. The correct interface for an unproven engine is one that
+> costs nothing to throw away.
 
 Ordered by expected payoff.
 
@@ -282,6 +333,7 @@ retroactively untrack files.
 ## The one-sentence version
 
 The product thinking was sound and parts of the retrieval design were genuinely good, but
-the project shipped no tests, never retired what it replaced, and treated the two most
-valuable assets in the system — the user's activity bank and the user's decisions — as
-disposable request payloads instead of persistent state.
+half the effort went into an interface built on top of an engine that had no tests, no
+persistence and two diverged implementations — so the presentation layer ended up
+hardening the very mistakes underneath it, and has to be discarded before they can be
+fixed.
